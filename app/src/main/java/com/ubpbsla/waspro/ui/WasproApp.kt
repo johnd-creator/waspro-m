@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package com.ubpbsla.waspro.ui
 
@@ -64,10 +64,15 @@ fun WasproApp(model: WasproViewModel) {
     LaunchedEffect(message) {
         message?.let { snackbar.showSnackbar(it); model.message.value = null }
     }
-    MaterialTheme(colorScheme = FieldColors) {
+    MaterialTheme(colorScheme = FieldColors, shapes = FieldShapes) {
         Surface(Modifier.fillMaxSize()) {
             when {
-                starting -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                starting -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Image(painterResource(R.drawable.ic_waspro), "WASPRO", Modifier.size(54.dp).clip(MaterialTheme.shapes.medium))
+                    Text("Menyiapkan ruang kerja…", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.titleMedium)
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                }
                 identity == null -> Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
                     LoginScreen(busy, Modifier.padding(padding), model::login)
                 }
@@ -83,6 +88,7 @@ fun WasproApp(model: WasproViewModel) {
                             "more" -> "Lainnya"
                             "drafts" -> "Draft lokal"
                             "reports" -> "Laporan"
+                            "about" -> "Tentang aplikasi"
                             else -> Modules.all.find { it.key == page.module }?.title ?: "WASPRO"
                         }
                     }
@@ -92,7 +98,7 @@ fun WasproApp(model: WasproViewModel) {
                     Scaffold(
                         snackbarHost = { SnackbarHost(snackbar) },
                         topBar = {
-                            TopAppBar(title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
+                            TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background), title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
                                 if (backStack.size > 1) IconButton(onClick = { backStack.removeLastOrNull() }) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
                                 } else Image(painterResource(R.drawable.ic_waspro), "WASPRO",
@@ -114,7 +120,7 @@ fun WasproApp(model: WasproViewModel) {
                                             "approval-menu" -> Icons.AutoMirrored.Filled.FactCheck
                                             else -> Icons.Default.Menu
                                         }, null)
-                                    }, label = { Text(text, maxLines = 1) })
+                                    }, label = { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
                                 }
                             }
                         },
@@ -122,7 +128,7 @@ fun WasproApp(model: WasproViewModel) {
                         Column(Modifier.padding(padding).fillMaxSize()) {
                             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (user.organization.text("id").isBlank()) {
-                                Text("Organisasi belum tersedia. Hubungi administrator.", Modifier.padding(20.dp))
+                                InfoPanel(Icons.Default.Business, "Organisasi belum tersedia", "Hubungi administrator untuk memeriksa penugasan akun Anda.")
                                 Button(onClick = model::logout) { Text("Keluar") }
                             } else NavDisplay(
                                 backStack = backStack,
@@ -156,7 +162,7 @@ fun LoginScreen(busy: Boolean, modifier: Modifier = Modifier, submit: (String, S
             LandscapeHeader("OPERASIONAL LINGKUNGAN", "WASPRO", "Pengelolaan limbah dan FABA")
             FormPanel {
                 Text("Masuk ke akun Anda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Gunakan akun organisasi yang diberikan administrator.", Modifier.padding(top = 4.dp),
+                Text("Masukkan email dan password akun organisasi Anda.", Modifier.padding(top = 4.dp),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") },
@@ -182,7 +188,10 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
     val module = Modules.all.find { it.key == page.module }
     val allowed = module == null || Modules.visible(module, user)
     if (!allowed) {
-        Text("Akses modul sudah berubah. Kembali ke beranda.", Modifier.padding(20.dp))
+        ScrollContent {
+            InfoPanel(Icons.Default.Lock, "Akses modul berubah", "Pilih modul lain yang tersedia untuk akun Anda.")
+            OutlinedButton(onClick = back) { Text("Kembali") }
+        }
         return
     }
     when (page.kind) {
@@ -197,13 +206,16 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
             }
             SectionHeading("Ringkasan operasional")
         }) { state ->
-            FormPanel { JsonDetails(state.data) }
+            DashboardSummary(state.data)
         }
         "waste-menu" -> ScrollContent {
+            LandscapeHeader("OPERASIONAL  /  LIMBAH", "Pengelolaan limbah", "Telusuri catatan dari penyimpanan hingga pengangkutan.")
+            SectionHeading("Pencatatan dan pengangkutan")
             ModuleTiles(listOf(Modules.waste, Modules.hauling), user, open)
         }
         "faba-menu" -> ScrollContent {
-            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Ringkasan material dan TPS") {
+            LandscapeHeader("OPERASIONAL  /  FABA", "Pusat material FABA", "Pantau produksi, pemanfaatan, dan saldo material.")
+            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Ringkasan material dan TPS", Icons.Default.Assessment) {
                 open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
             }
             ModuleTiles(listOf(Modules.production, Modules.utilization, Modules.adjustments, Modules.periods), user, open, "Transaksi dan periode")
@@ -214,6 +226,8 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
             if (user.can("faba_approvals.view")) MenuTile("Riwayat FABA", "Persetujuan dan 100 aktivitas terbaru") { open(Page("read", Modules.history.key)) }
         }
         "approval-menu" -> ScrollContent {
+            LandscapeHeader("PENGAWASAN", "Meja persetujuan", "Pilih jenis pengajuan untuk meninjau catatan dan mengambil tindakan.")
+            SectionHeading("Jenis pengajuan")
             if (user.can("waste_records.approve") || user.can("waste_records.reject")) MenuTile("Persetujuan limbah", "Catatan menunggu review") {
                 open(Page("list", "waste", path = "waste-records/pending-approval", title = "Persetujuan limbah"))
             }
@@ -228,23 +242,24 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
         "more" -> MoreScreen(model, user, open)
         "list" -> RecordList(page, module!!, model, user, open)
         "detail" -> RecordDetail(page, module!!, model, user, open, back)
-        "read" -> DataPanel(page, page.path.ifBlank { module!!.path }, model, module?.filters.orEmpty()) { JsonDetails(it.data) }
+        "read" -> DataPanel(page, page.path.ifBlank { module!!.path }, model, module?.filters.orEmpty()) {
+            if (page.path == "faba/dashboard") DashboardSummary(it.data) else FormPanel { JsonDetails(it.data) }
+        }
         "editor" -> EditorScreen(model, module!!, back)
         "drafts" -> {
             val drafts by model.drafts.collectAsStateWithLifecycle()
             ScrollContent {
-                Text("Tersimpan di perangkat. Kirim setelah koneksi tersedia.")
-                if (drafts.isEmpty()) Text("Belum ada draft lokal.", Modifier.padding(vertical = 20.dp))
+                SectionHeading("Tersimpan di perangkat")
+                if (drafts.isEmpty()) InfoPanel(Icons.Default.EditNote, "Belum ada draft lokal.", "Formulir yang disimpan di perangkat akan muncul di sini.")
+                else Text("${drafts.size} draft · Buka untuk melanjutkan pengisian.", style = MaterialTheme.typography.bodyMedium)
                 drafts.forEach { draft ->
                     val spec = Modules.find(draft.module)
-                    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(spec.title, style = MaterialTheme.typography.titleMedium)
-                            Text(timeText(draft.updatedAt))
-                            Row {
-                                TextButton(onClick = { model.openEditor(spec, savedDraft = draft); open(Page("editor", spec.key, id = draft.id)) }) { Text("Buka") }
-                                TextButton(onClick = { model.removeDraft(draft) }) { Text("Hapus") }
-                            }
+                    FormPanel {
+                        Text(spec.title, style = MaterialTheme.typography.titleMedium)
+                        Text("Terakhir diedit · ${timeText(draft.updatedAt)}", style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            TextButton(onClick = { model.openEditor(spec, savedDraft = draft); open(Page("editor", spec.key, id = draft.id)) }) { Text("Buka") }
+                            TextButton(onClick = { model.removeDraft(draft) }) { Text("Hapus") }
                         }
                     }
                 }
@@ -252,9 +267,8 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
         }
         "reports" -> ReportsScreen(model, user)
         "about" -> ScrollContent {
-            Text("WASPRO Mobile", style = MaterialTheme.typography.headlineSmall)
-            Text("Versi ${BuildConfig.VERSION_NAME}")
-            Text("Untuk bantuan akun dan operasional, hubungi administrator organisasi Anda.")
+            LandscapeHeader("INFORMASI APLIKASI", "WASPRO Mobile", "Versi ${BuildConfig.VERSION_NAME}")
+            InfoPanel(Icons.Default.Info, "Bantuan operasional", "Untuk bantuan akun dan operasional, hubungi administrator organisasi Anda.")
         }
     }
 }
@@ -264,6 +278,7 @@ private fun MoreScreen(model: WasproViewModel, user: UserContext, open: (Page) -
     var logout by remember { mutableStateOf(false) }
     val drafts by model.drafts.collectAsStateWithLifecycle()
     ScrollContent {
+        LandscapeHeader("AKUN ORGANISASI", user.user.text("name"), user.organization.text("name"))
         SectionHeading("Akun dan penyimpanan")
         MenuTile("Profil", user.user.text("email"), Icons.Default.Person) { open(Page("detail", "profile")) }
         MenuTile("Ganti password", "Kelola keamanan akun", Icons.Default.Lock) { model.openEditor(Modules.password); open(Page("editor", "password")) }
@@ -305,9 +320,7 @@ private fun MenuTile(title: String, description: String, icon: ImageVector? = nu
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (icon != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
-                Icon(icon, null, Modifier.padding(10.dp).size(22.dp), tint = MaterialTheme.colorScheme.primary)
-            }
+            IconTile(icon ?: Icons.Default.Folder)
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 if (description.isNotBlank()) Text(description, Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -319,8 +332,11 @@ private fun MenuTile(title: String, description: String, icon: ImageVector? = nu
 
 @Composable
 private fun ScrollContent(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    }
 }
 
 @Composable
@@ -381,7 +397,13 @@ private fun FilterFields(keys: List<String>, values: Map<String, String>, option
     if (keys.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
     var draft by remember { mutableStateOf(values) }
-    TextButton(onClick = { expanded = !expanded }) { Icon(Icons.Default.FilterList, null); Text("Filter") }
+    val active = keys.count { !values[it].isNullOrBlank() }
+    OutlinedButton(onClick = { expanded = !expanded }) {
+        Icon(Icons.Default.FilterList, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(if (active == 0) "Filter" else "Filter · $active aktif")
+        Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+    }
     if (expanded) {
         keys.forEach { key ->
             val lookupKey = lookupFilters[key]
@@ -393,7 +415,10 @@ private fun FilterFields(keys: List<String>, values: Map<String, String>, option
             }, lookup = lookupKey ?: if (key == "status") "statuses" else null)
             FormField(field, draft[key].orEmpty(), null, choices, draft, enabled = true) { draft = draft + (key to it) }
         }
-        Button(onClick = { apply(draft.filterValues(String::isNotBlank)); expanded = false }) { Text("Terapkan") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { apply(draft.filterValues(String::isNotBlank)); expanded = false }) { Text("Terapkan") }
+            TextButton(onClick = { draft = emptyMap(); apply(emptyMap()); expanded = false }) { Text("Reset filter") }
+        }
     }
 }
 
@@ -416,7 +441,8 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
             Button({ model.openEditor(module); open(Page("editor", module.key)) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Tambah ${module.title.lowercase()}") }
         }
         FilterFields(if (page.path.isBlank()) module.filters else emptyList(), query, options) {
-            filterJson = jsonObject(it).toString(); model.load(key, path, it)
+            filterJson = jsonObject(it).toString()
+            model.load(key, path, it + query.filterKeys { key -> key == "paginate" })
         }
         StateHeader(state) { model.load(key, path, query) }
         val rows = state.data as? JsonArray
@@ -436,16 +462,17 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
             }.getOrDefault("")
             val summary = listOf(item.text("date").ifBlank { item.text("transaction_date") },
                 item.obj("waste_type").text("name"), item.text("source"), statuses[movement?.material ?: item.text("material_type")].orEmpty(),
-                listOf(quantityText, item.text("unit")).filter(String::isNotBlank).joinToString(" "),
-                item.text("status_label").ifBlank { statuses[movement?.approvalStatus ?: item.text("approval_status")].orEmpty() }).filter(String::isNotBlank).joinToString(" · ")
+            ).filter(String::isNotBlank).joinToString(" · ")
+            val statusKey = movement?.approvalStatus.orEmpty().ifBlank { item.text("approval_status").ifBlank { item.text("status") } }
+            val statusText = item.text("status_label").ifBlank { statuses[statusKey] ?: statusKey }
+            val amount = listOf(quantityText, item.text("unit")).filter(String::isNotBlank).joinToString(" ")
             val domainSummary = when {
                 module == Modules.hauling && page.path.isBlank() -> runCatching { HaulingBacklogDto.from(item) }.getOrNull()?.let {
                     "$summary · Sisa ${it.remaining.toPlainString()} · Reservasi ${it.reserved.toPlainString()}"
                 }
-                module == Modules.hauling -> HaulingRequestDto.from(item).let { "$summary · ${statuses[it.status] ?: it.status}" }
                 else -> null
             } ?: summary
-            MenuTile(title, domainSummary) {
+            RecordCard(title, domainSummary.trim(' ', '·'), amount, statusKey, statusText) {
                 val id = if (module == Modules.periods) "${item.text("year")}/${item.text("month")}" else item.text("id")
                 val detailPath = when {
                     module == Modules.hauling && page.path.isBlank() -> "waste-haulings/history/$id"
@@ -454,7 +481,7 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
                 open(Page("detail", targetModule.key, id, detailPath, title))
             }
         }
-        if (rows == null && state.data != JsonNull) JsonDetails(state.data)
+        if (rows == null && state.data != JsonNull) FormPanel { JsonDetails(state.data) }
         val pagination = state.meta.obj("pagination")
         val current = pagination.text("current_page").toIntOrNull() ?: 1
         val last = pagination.text("last_page").toIntOrNull() ?: 1
@@ -478,11 +505,14 @@ private fun RecordDetail(page: Page, module: ModuleSpec, model: WasproViewModel,
             module == Modules.hauling && "record" in raw -> raw.obj("record")
             else -> raw
         }
-        JsonDetails(raw)
+        SectionHeading(if (module == Modules.profile) "Informasi akun" else "Rincian catatan")
+        FormPanel { JsonDetails(raw) }
         if (module == Modules.history) Text("Riwayat aktivitas menampilkan maksimal 100 entri terbaru.")
         if (state.cachedAt == null) {
             val actions = if (module == Modules.profile) setOf("update") else record.actions()
-            actions.filter { it !in listOf("view", "review") }.forEach { action ->
+            val available = actions.filter { it !in listOf("view", "review") }
+            if (available.isNotEmpty()) SectionHeading("Tindakan tersedia")
+            available.forEach { action ->
                 OutlinedButton(onClick = {
                     when (action) {
                         "update" -> { model.openEditor(module, record); open(Page("editor", module.key, page.id)) }
@@ -571,18 +601,27 @@ private fun EditorScreen(model: WasproViewModel, module: ModuleSpec, back: () ->
             else Text("Status atau izin server sudah tidak mengizinkan perubahan.", color = MaterialTheme.colorScheme.error)
             HorizontalDivider()
         }
-        module.fields.forEach { field ->
-            val external = current.values["movement_type"] == "utilization_external"
-            val hidden = module == Modules.utilization && when (field.key) {
-                "vendor_id", "document_number", "document_date" -> !external
-                "internal_destination_id" -> external
-                else -> false
-            }
-            if (!hidden && field.key != "waste_record_id") FormField(field, current.values[field.key].orEmpty(), current.errors[field.key], lookup, current.values, enabled = !busy && !locked) {
-                model.change(field.key, it)
+        SectionHeading("Isian formulir")
+        FormPanel {
+            Text("Kolom bertanda * wajib diisi.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                module.fields.forEach { field ->
+                    val external = current.values["movement_type"] == "utilization_external"
+                    val hidden = module == Modules.utilization && when (field.key) {
+                        "vendor_id", "document_number", "document_date" -> !external
+                        "internal_destination_id" -> external
+                        else -> false
+                    }
+                    if (!hidden && field.key != "waste_record_id") FormField(field, current.values[field.key].orEmpty(), current.errors[field.key], lookup, current.values, enabled = !busy && !locked) {
+                        model.change(field.key, it)
+                    }
+                }
             }
         }
         if (module == Modules.utilization) {
+            SectionHeading("Dokumen pendukung")
             Text(current.draft?.attachment?.let { "Lampiran dipilih · ${File(it).name}" }
                 ?: if (current.existingAttachment) "Lampiran server tersedia" else "Belum ada lampiran")
             current.errors["attachment"]?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -636,7 +675,7 @@ private fun FormField(field: InputField, value: String, error: String?, lookup: 
             ExposedDropdownMenuBox(expanded && enabled, { if (enabled) expanded = !expanded }) {
                 OutlinedTextField(options.firstOrNull { it.first == value }?.second ?: value, {}, readOnly = true,
                     label = { Text(field.label + if (field.required) " *" else "") }, isError = error != null,
-                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                    enabled = enabled, modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled),
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) })
                 ExposedDropdownMenu(expanded && enabled, { expanded = false }) {
                     if (!field.required) DropdownMenuItem(text = { Text("Tidak dipilih") }, onClick = { change(""); expanded = false })
@@ -670,16 +709,23 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
     LaunchedEffect(Unit) { model.loadOptions() }
     val busy by model.busy.collectAsStateWithLifecycle()
     ScrollContent {
-        OutlinedTextField(year, { year = it }, label = { Text("Tahun") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        OutlinedTextField(month, { month = it }, label = { Text("Bulan") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        Text("Material")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionHeading("Periode laporan")
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(year, { year = it }, Modifier.weight(1f), singleLine = true, label = { Text("Tahun") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(month, { month = it }, Modifier.weight(1f), singleLine = true, label = { Text("Bulan") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        }
+        SectionHeading("Material")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("" to "Semua", "fly_ash" to "Fly Ash", "bottom_ash" to "Bottom Ash").forEach { (key, title) ->
                 FilterChip(selected = material == key, onClick = { material = key }, label = { Text(title) })
             }
         }
         val extras = wireJson.parseToJsonElement(extraFilters).jsonObject.mapValues { it.value.jsonPrimitive.content }
-        listOf("vendor_id", "internal_destination_id", "purpose_id", "movement_type").forEach { key ->
+        var showFilters by rememberSaveable { mutableStateOf(false) }
+        OutlinedButton(onClick = { showFilters = !showFilters }) {
+            Text("Filter tambahan" + if (extras.values.any(String::isNotBlank)) " · aktif" else "")
+        }
+        if (showFilters) listOf("vendor_id", "internal_destination_id", "purpose_id", "movement_type").forEach { key ->
             FormField(InputField(key, label(key), kind = FieldKind.Choice, lookup = lookupFilters[key]),
                 extras[key].orEmpty(), null, options, extras, enabled = !busy) {
                 extraFilters = jsonObject(extras + (key to it)).toString()
@@ -687,18 +733,24 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
         }
         val filters = (extras + mapOf("year" to year, "month" to month, "material_type" to material)).filterValues(String::isNotBlank)
         val validPeriod = year.toIntOrNull() in 2000..2100 && month.toIntOrNull() in 1..12
+        if (!validPeriod) Text("Isi tahun 2000–2100 dan bulan 1–12 untuk mengunduh laporan.", color = MaterialTheme.colorScheme.error)
+        if (user.can("faba_reports.export")) SectionHeading("Unduh laporan FABA")
         if (user.can("faba_reports.export")) listOf(
             "monthly" to "Bulanan", "yearly" to "Tahunan", "vendors" to "Vendor", "internal-destinations" to "Tujuan internal",
             "purposes" to "Tujuan penggunaan", "stock-card" to "Kartu stok", "anomalies" to "Anomali", "analysis-matrix" to "Matriks analisis",
         ).forEach { (report, title) ->
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Row {
-                listOf("pdf", "xlsx").forEach { format ->
-                    TextButton(onClick = { model.download("faba/reports/$report.$format", filters, "waspro-$report-$year-$month.$format") { shareFile(context, it) } }, enabled = !busy && validPeriod) { Text(format.uppercase()) }
+            FormPanel {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("pdf", "xlsx").forEach { format ->
+                        TextButton(onClick = { model.download("faba/reports/$report.$format", filters, "waspro-$report-$year-$month.$format") { shareFile(context, it) } }, enabled = !busy && validPeriod) { Text(format.uppercase()) }
+                    }
                 }
             }
         }
-        listOf(Modules.waste, Modules.production, Modules.utilization).filter { Modules.visible(it, user) }.forEach { module ->
+        val exports = listOf(Modules.waste, Modules.production, Modules.utilization).filter { Modules.visible(it, user) }
+        if (exports.isNotEmpty()) SectionHeading("Ekspor data CSV")
+        exports.forEach { module ->
             OutlinedButton(onClick = { model.download("${module.path}/export/csv", filters, "waspro-${module.key}.csv") { shareFile(context, it) } }, enabled = !busy && validPeriod) { Text("CSV ${module.title}") }
         }
     }
@@ -710,7 +762,7 @@ private val lookupFilters = mapOf(
 )
 
 @Composable
-private fun JsonDetails(element: JsonElement, depth: Int = 0) {
+internal fun JsonDetails(element: JsonElement, depth: Int = 0) {
     when (element) {
         is JsonObject -> {
             val ignored = setOf("id", "resource_version", "allowed_actions", "attachment_path", "password", "token", "remember_token", "is_super_admin", "deleted_at", "can_submit", "can_approve", "can_reject", "can_review", "can_reopen")
@@ -739,7 +791,7 @@ private fun JsonDetails(element: JsonElement, depth: Int = 0) {
     }
 }
 
-private fun displayValue(key: String, value: JsonPrimitive): String {
+internal fun displayValue(key: String, value: JsonPrimitive): String {
     val text = value.content
     statuses[text]?.let { return it }
     if (key.endsWith("_at")) {

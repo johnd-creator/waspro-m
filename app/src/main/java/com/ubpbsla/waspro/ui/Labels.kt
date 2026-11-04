@@ -40,6 +40,8 @@ val labels = mapOf(
     "purpose_breakdown" to "Rincian penggunaan", "capacity" to "Kapasitas TPS", "warning_threshold" to "Ambang warning",
     "critical_threshold" to "Ambang critical", "utilization_percentage" to "Pemakaian kapasitas (%)",
     "tps_capacity_summary" to "Kapasitas TPS", "stock_effect" to "Arah stok", "total" to "Total",
+    "resolved_period" to "Periode laporan", "available_periods" to "Periode tersedia",
+    "capacity_summary" to "Kapasitas TPS", "stock_card_summary" to "Ringkasan kartu stok",
     "search" to "Cari nomor / jenis / sumber", "vendor_id" to "Vendor", "set_at" to "Diatur pada", "set_by_user" to "Pengatur",
 )
 fun label(key: String) = labels[key] ?: key.replace('_', ' ').replaceFirstChar(Char::uppercase)
