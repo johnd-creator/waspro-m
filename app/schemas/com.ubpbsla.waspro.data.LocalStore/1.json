@@ -1,0 +1,124 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "1fe862931e36686684d2fce839fe0900",
+    "entities": [
+      {
+        "tableName": "drafts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`scope` TEXT NOT NULL, `id` TEXT NOT NULL, `module` TEXT NOT NULL, `recordId` TEXT, `payload` TEXT NOT NULL, `attachment` TEXT, `requestKey` TEXT NOT NULL, `sourceVersion` TEXT, `updatedAt` INTEGER NOT NULL, `submittedPayload` TEXT, `submittedAttachmentHash` TEXT, PRIMARY KEY(`scope`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "scope",
+            "columnName": "scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "module",
+            "columnName": "module",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attachment",
+            "columnName": "attachment",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "requestKey",
+            "columnName": "requestKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceVersion",
+            "columnName": "sourceVersion",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "submittedPayload",
+            "columnName": "submittedPayload",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "submittedAttachmentHash",
+            "columnName": "submittedAttachmentHash",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "scope",
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "cached_responses",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`scope` TEXT NOT NULL, `path` TEXT NOT NULL, `payload` TEXT NOT NULL, `savedAt` INTEGER NOT NULL, PRIMARY KEY(`scope`, `path`))",
+        "fields": [
+          {
+            "fieldPath": "scope",
+            "columnName": "scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedAt",
+            "columnName": "savedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "scope",
+            "path"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1fe862931e36686684d2fce839fe0900')"
+    ]
+  }
+}

@@ -10,4 +10,4 @@ Gunakan BuildConfig.API_BASE_URL untuk URL dasar. Periksa kontrak di F:\was-pro\
 
 ## Verifikasi
 
-Jalankan .\gradlew.bat :app:assembleDebug :app:lintDebug setelah mengubah aplikasi. Jalankan :app:testDebugUnitTest saat menambahkan logika yang diuji. Untuk pengujian UI, pilih emulator atau perangkat uji melalui Android Studio.
+Jalankan .\gradlew.bat :app:assembleProductionDebug :app:lintProductionDebug setelah mengubah aplikasi. Jalankan :app:testProductionDebugUnitTest saat menambahkan logika yang diuji. Untuk pengujian UI, jalankan :app:connectedProductionDebugAndroidTest pada emulator atau perangkat uji. Development/staging/production menggunakan product flavor terpisah.

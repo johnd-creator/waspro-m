@@ -1,17 +1,20 @@
 package com.ubpbsla.waspro
 
-import android.app.Activity
 import android.os.Bundle
-import android.view.Gravity
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
+import com.ubpbsla.waspro.features.WasproViewModel
+import com.ubpbsla.waspro.ui.WasproApp
+import dagger.hilt.android.AndroidEntryPoint
 
-class MainActivity : Activity() {
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+    private val model: WasproViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(TextView(this).apply {
-            gravity = Gravity.CENTER
-            textSize = 24f
-            setText(R.string.app_name)
-        })
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
+        setContent { WasproApp(model) }
     }
 }
