@@ -307,11 +307,15 @@ private fun DataPanel(page: Page, path: String, model: WasproViewModel, filters:
     val key = page.toString()
     val screens by model.screens.collectAsStateWithLifecycle()
     val state = screens[key] ?: ScreenData()
+    val options by model.lookups.collectAsStateWithLifecycle()
     var filterJson by rememberSaveable { mutableStateOf("{}") }
     val query = wireJson.parseToJsonElement(filterJson).jsonObject.mapValues { it.value.jsonPrimitive.content }
-    LaunchedEffect(key) { model.load(key, path, query) }
+    LaunchedEffect(key) {
+        model.load(key, path, query)
+        if (filters.any { it in lookupFilters }) model.loadOptions()
+    }
     ScrollContent {
-        FilterFields(filters, query) { filterJson = jsonObject(it).toString(); model.load(key, path, it) }
+        FilterFields(filters, query, options) { filterJson = jsonObject(it).toString(); model.load(key, path, it) }
         StateHeader(state) { model.load(key, path, query) }
         if (state.data != JsonNull) content(state)
     }
@@ -329,15 +333,21 @@ private fun StateHeader(state: ScreenData, refresh: () -> Unit) {
 }
 
 @Composable
-private fun FilterFields(keys: List<String>, values: Map<String, String>, apply: (Map<String, String>) -> Unit) {
+private fun FilterFields(keys: List<String>, values: Map<String, String>, options: JsonObject, apply: (Map<String, String>) -> Unit) {
     if (keys.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
     var draft by remember { mutableStateOf(values) }
     TextButton(onClick = { expanded = !expanded }) { Icon(Icons.Default.FilterList, null); Text("Filter") }
     if (expanded) {
         keys.forEach { key ->
-            OutlinedTextField(draft[key].orEmpty(), { draft = draft + (key to it) }, Modifier.fillMaxWidth(),
-                label = { Text(label(key)) }, singleLine = true)
+            val lookupKey = lookupFilters[key]
+            val choices = if (key == "status") JsonObject(mapOf("statuses" to JsonArray(listOf("draft", "pending_approval", "approved", "rejected").map(::JsonPrimitive)))) else options
+            val field = InputField(key, label(key), kind = when {
+                lookupKey != null || key == "status" -> FieldKind.Choice
+                key in listOf("year", "month") -> FieldKind.Integer
+                else -> FieldKind.Text
+            }, lookup = lookupKey ?: if (key == "status") "statuses" else null)
+            FormField(field, draft[key].orEmpty(), null, choices, draft, enabled = true) { draft = draft + (key to it) }
         }
         Button(onClick = { apply(draft.filterValues(String::isNotBlank)); expanded = false }) { Text("Terapkan") }
     }
@@ -349,15 +359,19 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
     val key = page.toString()
     val screens by model.screens.collectAsStateWithLifecycle()
     val state = screens[key] ?: ScreenData()
+    val options by model.lookups.collectAsStateWithLifecycle()
     var filterJson by rememberSaveable { mutableStateOf("{}") }
     val query = wireJson.parseToJsonElement(filterJson).jsonObject.mapValues { it.value.jsonPrimitive.content } +
         if (module == Modules.hauling || path == "faba/movements/pending-approval") mapOf("paginate" to "true") else emptyMap()
-    LaunchedEffect(key) { model.load(key, path, query) }
+    LaunchedEffect(key) {
+        model.load(key, path, query)
+        if (module.filters.any { it in lookupFilters }) model.loadOptions()
+    }
     ScrollContent {
         if (module.createPermission != null && user.can(module.createPermission) && page.path.isBlank() && module != Modules.hauling) {
             Button({ model.openEditor(module); open(Page("editor", module.key)) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Tambah ${module.title.lowercase()}") }
         }
-        FilterFields(if (page.path.isBlank()) module.filters else emptyList(), query) {
+        FilterFields(if (page.path.isBlank()) module.filters else emptyList(), query, options) {
             filterJson = jsonObject(it).toString(); model.load(key, path, it)
         }
         StateHeader(state) { model.load(key, path, query) }
@@ -607,6 +621,9 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
     var year by rememberSaveable { mutableStateOf(LocalDate.now().year.toString()) }
     var month by rememberSaveable { mutableStateOf(LocalDate.now().monthValue.toString()) }
     var material by rememberSaveable { mutableStateOf("") }
+    var extraFilters by rememberSaveable { mutableStateOf("{}") }
+    val options by model.lookups.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { model.loadOptions() }
     val busy by model.busy.collectAsStateWithLifecycle()
     ScrollContent {
         OutlinedTextField(year, { year = it }, label = { Text("Tahun") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
@@ -617,7 +634,14 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
                 FilterChip(selected = material == key, onClick = { material = key }, label = { Text(title) })
             }
         }
-        val filters = mapOf("year" to year, "month" to month, "material_type" to material).filterValues(String::isNotBlank)
+        val extras = wireJson.parseToJsonElement(extraFilters).jsonObject.mapValues { it.value.jsonPrimitive.content }
+        listOf("vendor_id", "internal_destination_id", "purpose_id", "movement_type").forEach { key ->
+            FormField(InputField(key, label(key), kind = FieldKind.Choice, lookup = lookupFilters[key]),
+                extras[key].orEmpty(), null, options, extras, enabled = !busy) {
+                extraFilters = jsonObject(extras + (key to it)).toString()
+            }
+        }
+        val filters = (extras + mapOf("year" to year, "month" to month, "material_type" to material)).filterValues(String::isNotBlank)
         val validPeriod = year.toIntOrNull() in 2000..2100 && month.toIntOrNull() in 1..12
         if (user.can("faba_reports.export")) listOf(
             "monthly" to "Bulanan", "yearly" to "Tahunan", "vendors" to "Vendor", "internal-destinations" to "Tujuan internal",
@@ -635,6 +659,11 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
         }
     }
 }
+
+private val lookupFilters = mapOf(
+    "material_type" to "materials", "movement_type" to "movement_types", "vendor_id" to "vendors",
+    "internal_destination_id" to "internal_destinations", "purpose_id" to "purposes",
+)
 
 @Composable
 private fun JsonDetails(element: JsonElement, depth: Int = 0) {

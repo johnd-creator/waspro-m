@@ -48,7 +48,6 @@ class WasproViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     private val draftMutex = Mutex()
     private var saving: Job? = null
-    private var lookupScope = ""
 
     init {
         viewModelScope.launch {
@@ -81,11 +80,12 @@ class WasproViewModel @Inject constructor(
         repository.login(email, password)
         screens.value = emptyMap()
         lookups.value = JsonObject(emptyMap())
-        lookupScope = ""
         editor.value = null
     }
     fun logout() = runOperation {
-        repository.logout()
+        saving?.cancelAndJoin()
+        persistEditor()
+        draftMutex.withLock { repository.logout() }
         lookups.value = JsonObject(emptyMap())
         screens.value = emptyMap()
         editor.value = null
@@ -111,18 +111,28 @@ class WasproViewModel @Inject constructor(
         }
     }
     private suspend fun refreshLookups() {
+        val requestScope = repository.scope
         val base = repository.load("lookups").page.data.objectOrEmpty()
         val faba = if (user.value?.permissions?.any { it.startsWith("faba_") } == true)
             repository.load("faba/options").page.data.objectOrEmpty() else JsonObject(emptyMap())
-        lookups.value = JsonObject(base + faba)
-        lookupScope = repository.scope
+        val movementTypes = listOf("production_movement_types", "utilization_movement_types", "adjustment_movement_types")
+            .flatMap { faba.array(it) }.distinct()
+        if (requestScope != repository.scope) throw CancellationException("Konteks organisasi berubah")
+        lookups.value = JsonObject(base + faba + ("movement_types" to JsonArray(movementTypes)))
+    }
+    fun loadOptions() {
+        viewModelScope.launch {
+            try { refreshLookups() }
+            catch (failure: CancellationException) { throw failure }
+            catch (failure: Exception) { message.value = readable(failure) }
+        }
     }
     fun openEditor(module: ModuleSpec, record: JsonObject? = null, savedDraft: Draft? = null, initial: Map<String, String> = emptyMap()) {
         saving?.cancel()
         editor.value = null
         conflict.value = null
         runOperation {
-            if (module.fields.any { it.lookup != null } && lookupScope != repository.scope) refreshLookups()
+            if (module.fields.any { it.lookup != null }) refreshLookups()
             val values = savedDraft?.let { wireJson.parseToJsonElement(it.payload).jsonObject.mapValues { entry -> entry.value.jsonPrimitive.content } }
                 ?: module.fields.associate { field ->
                     field.key to (record?.text(field.key)?.takeIf(String::isNotBlank) ?: when {
