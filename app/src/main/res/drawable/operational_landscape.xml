@@ -1,17 +1,13 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="360dp" android:height="84dp"
-    android:viewportWidth="360" android:viewportHeight="84">
-    <!-- Sun and distant terrain -->
-    <path android:fillColor="#DCF08C" android:pathData="M276,5a15,15 0,1 0,0.01,0z" />
-    <path android:fillColor="#286456" android:pathData="M0,64Q38,46 74,52T148,47Q195,30 231,43T304,39Q332,26 360,32V84H0Z" />
-    <path android:fillColor="#397668" android:pathData="M0,70Q62,49 115,62T218,55Q269,37 314,48T360,45V84H0Z" />
-    <!-- Power station, stack bands, roof bays and conveyor -->
-    <path android:fillColor="#A4CCB6" android:pathData="M186,63l3,-48h6l3,48zM203,63l2,-38h5l3,38z" />
-    <path android:fillColor="#477D6C" android:pathData="M188.5,22h7v4h-7zM205,31h5.5v3h-5.5z" />
-    <path android:fillColor="#80B39C" android:pathData="M151,66V50l16,-8v8l16,-8v8l15,-8v24zM211,50h26v16h-26zM237,55l25,-12l2,3l-27,14zM259,47h4v17h-4z" />
-    <path android:fillColor="#57927D" android:pathData="M155,54h5v4h-5zM165,54h5v4h-5zM175,54h5v4h-5zM185,54h5v4h-5z" />
-    <!-- Terraced foreground -->
-    <path android:fillColor="#153E37" android:pathData="M0,59Q47,54 100,67T218,63Q286,49 360,61V84H0Z" />
-    <path android:fillColor="#00000000" android:strokeColor="#60967D" android:strokeWidth="1"
-        android:pathData="M-5,66Q43,60 96,73T218,69Q287,55 365,68M-5,72Q43,66 96,79T219,75Q289,61 365,74M-5,78Q43,72 96,85T220,81Q290,67 365,80" />
+    android:width="360dp" android:height="64dp" android:viewportWidth="360" android:viewportHeight="64">
+    <!-- Waterfront and plant elevation, drawn in the same ink as the workspace header. -->
+    <path android:fillColor="#285660" android:pathData="M0,47Q35,37 65,42T132,37Q168,29 201,38T270,33Q314,20 360,26V64H0Z" />
+    <path android:fillColor="#33676A" android:pathData="M0,52Q45,41 95,48T188,44Q240,29 278,39T360,30V64H0Z" />
+    <path android:fillColor="#A2C7BA" android:pathData="M208,47l2,-34h5l2,34zM221,47l2,-42h5l2,42z" />
+    <path android:fillColor="#527B7D" android:pathData="M210,18h5v3h-5zM223,10h5v3h-5zM223,16h5v2h-5z" />
+    <path android:fillColor="#77ACA3" android:pathData="M181,48V37l12,-7v7l12,-7v7l13,-7v18zM232,48V32h22v16zM253,39l23,-15l2,3l-25,16zM273,28h3v20h-3zM278,24h16v24h-16z" />
+    <path android:fillColor="#214D59" android:pathData="M185,40h3v3h-3zM192,40h3v3h-3zM199,40h3v3h-3zM206,40h3v3h-3zM237,36h4v9h-4zM245,36h4v9h-4z" />
+    <path android:fillColor="#163D4B" android:pathData="M0,49Q41,44 84,53T180,50Q219,43 253,47T360,39V64H0Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#467575" android:strokeWidth="0.8"
+        android:pathData="M-4,54Q40,49 83,58T181,55Q219,48 254,52T364,44M-4,59Q40,54 83,63T181,60Q219,53 254,57T364,49" />
 </vector>
