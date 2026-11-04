@@ -3,9 +3,10 @@
 package com.ubpbsla.waspro.ui
 
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,8 +21,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -34,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.*
 import androidx.navigation3.ui.NavDisplay
 import com.ubpbsla.waspro.BuildConfig
+import com.ubpbsla.waspro.R
 import com.ubpbsla.waspro.data.*
 import com.ubpbsla.waspro.features.*
 import kotlinx.serialization.Serializable
@@ -60,13 +64,7 @@ fun WasproApp(model: WasproViewModel) {
     LaunchedEffect(message) {
         message?.let { snackbar.showSnackbar(it); model.message.value = null }
     }
-    MaterialTheme(colorScheme = lightColorScheme(
-        primary = Color(0xFF006B57), secondary = Color(0xFF52685F),
-        tertiary = Color(0xFF426277), background = Color(0xFFF5F8F6),
-        surface = Color(0xFFF9FCF9), primaryContainer = Color(0xFF9CF2D5),
-        surfaceContainerLow = Color(0xFFEDF5F0), surfaceContainer = Color(0xFFE5EFE9),
-        secondaryContainer = Color(0xFFD6EDE0),
-    )) {
+    MaterialTheme(colorScheme = FieldColors) {
         Surface(Modifier.fillMaxSize()) {
             when {
                 starting -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -78,7 +76,7 @@ fun WasproApp(model: WasproViewModel) {
                     val page = backStack.last() as Page
                     val title = page.title.ifBlank {
                         when (page.kind) {
-                            "home" -> "WASPRO"
+                            "home" -> "Beranda"
                             "waste-menu" -> "Limbah"
                             "faba-menu" -> "FABA"
                             "approval-menu" -> "Persetujuan"
@@ -94,18 +92,19 @@ fun WasproApp(model: WasproViewModel) {
                     Scaffold(
                         snackbarHost = { SnackbarHost(snackbar) },
                         topBar = {
-                            TopAppBar(title = { Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
+                            TopAppBar(title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
                                 if (backStack.size > 1) IconButton(onClick = { backStack.removeLastOrNull() }) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
-                                }
+                                } else Image(painterResource(R.drawable.ic_waspro), "WASPRO",
+                                    Modifier.padding(start = 12.dp, end = 4.dp).size(32.dp).clip(RoundedCornerShape(9.dp)))
                             })
                         },
                         bottomBar = {
-                            NavigationBar {
+                            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                                 val tabs = listOf("home" to "Beranda", "waste-menu" to "Limbah", "faba-menu" to "FABA") +
                                     (if (user.canReview) listOf("approval-menu" to "Persetujuan") else emptyList()) + ("more" to "Lainnya")
-                                tabs.forEachIndexed { index, (kind, text) ->
-                                    NavigationBarItem(selected = page.kind == kind, onClick = {
+                                tabs.forEach { (kind, text) ->
+                                    NavigationBarItem(selected = (backStack.firstOrNull() as? Page)?.kind == kind, onClick = {
                                         if (!busy) { backStack.clear(); backStack.add(Page(kind)) }
                                     }, icon = {
                                         Icon(when (kind) {
@@ -114,7 +113,7 @@ fun WasproApp(model: WasproViewModel) {
                                             "faba-menu" -> Icons.Default.Factory
                                             "approval-menu" -> Icons.AutoMirrored.Filled.FactCheck
                                             else -> Icons.Default.Menu
-                                        }, text)
+                                        }, null)
                                     }, label = { Text(text, maxLines = 1) })
                                 }
                             }
@@ -151,28 +150,30 @@ fun LoginScreen(busy: Boolean, modifier: Modifier = Modifier, submit: (String, S
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
-        verticalArrangement = Arrangement.Center) {
-        Icon(Icons.Default.Eco, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(20.dp))
-        Text("WASPRO", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        Text("Kelola limbah dan FABA dalam satu tempat.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(32.dp))
-        Text("Masuk ke akun Anda", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(16.dp))
-        OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") },
-            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !busy)
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") },
-            singleLine = true, enabled = !busy,
-            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Tampilkan password") } })
-        Spacer(Modifier.height(24.dp))
-        Button({ submit(email, password) }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy && email.isNotBlank() && password.isNotBlank()) {
-            Text(if (busy) "Sedang masuk…" else "Masuk")
+    Column(modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.widthIn(max = 500.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LandscapeHeader("OPERASIONAL LINGKUNGAN", "WASPRO", "Pengelolaan limbah dan FABA")
+            FormPanel {
+                Text("Masuk ke akun Anda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Gunakan akun organisasi yang diberikan administrator.", Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") },
+                    leadingIcon = { Icon(Icons.Default.AlternateEmail, null) },
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !busy)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") },
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
+                    singleLine = true, enabled = !busy,
+                    visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Sembunyikan password" else "Tampilkan password") } })
+                Spacer(Modifier.height(24.dp))
+                Button({ submit(email, password) }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy && email.isNotBlank() && password.isNotBlank()) {
+                    Text(if (busy) "Sedang masuk…" else "Masuk")
+                }
+            }
         }
-        Spacer(Modifier.height(24.dp))
-        Text("Gunakan akun organisasi yang diberikan administrator.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -185,15 +186,18 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
         return
     }
     when (page.kind) {
-        "home" -> DataPanel(page, "dashboard", model) { state ->
-            Text("Halo, ${user.user.text("name")}", style = MaterialTheme.typography.headlineSmall)
-            Text("${user.organization.text("name")} · ${user.raw.obj("role").text("name")}")
-            Spacer(Modifier.height(16.dp))
-            MenuTile("Catatan limbah", "Input dan pantau penyimpanan limbah") { open(Page("list", "waste")) }
-            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Saldo, produksi dan kapasitas TPS") {
+        "home" -> DataPanel(page, "dashboard", model, header = {
+            LandscapeHeader("RUANG KERJA", "Halo, ${user.user.text("name")}",
+                listOf(user.organization.text("name"), user.raw.obj("role").text("name")).filter(String::isNotBlank).joinToString(" · "))
+            val showWaste = Modules.visible(Modules.waste, user)
+            if (showWaste || user.can("faba_dashboard.view")) SectionHeading("Akses cepat")
+            if (showWaste) MenuTile("Catatan limbah", "Input dan pantau penyimpanan limbah", Icons.Default.Inventory2) { open(Page("list", "waste")) }
+            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Saldo, produksi dan kapasitas TPS", Icons.Default.Factory) {
                 open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
             }
-            JsonDetails(state.data)
+            SectionHeading("Ringkasan operasional")
+        }) { state ->
+            FormPanel { JsonDetails(state.data) }
         }
         "waste-menu" -> ScrollContent {
             ModuleTiles(listOf(Modules.waste, Modules.hauling), user, open)
@@ -202,7 +206,8 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
             if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Ringkasan material dan TPS") {
                 open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
             }
-            ModuleTiles(listOf(Modules.production, Modules.utilization, Modules.adjustments, Modules.periods) + Modules.recaps, user, open)
+            ModuleTiles(listOf(Modules.production, Modules.utilization, Modules.adjustments, Modules.periods), user, open, "Transaksi dan periode")
+            ModuleTiles(Modules.recaps, user, open, "Rekap dan saldo")
             if (user.can("faba_opening_balance.manage")) listOf(Modules.opening, Modules.capacity).forEach {
                 MenuTile(it.title, "Pengaturan operasional") { model.openEditor(it); open(Page("editor", it.key)) }
             }
@@ -259,13 +264,14 @@ private fun MoreScreen(model: WasproViewModel, user: UserContext, open: (Page) -
     var logout by remember { mutableStateOf(false) }
     val drafts by model.drafts.collectAsStateWithLifecycle()
     ScrollContent {
-        MenuTile("Profil", user.user.text("email")) { open(Page("detail", "profile")) }
-        MenuTile("Ganti password", "Kelola keamanan akun") { model.openEditor(Modules.password); open(Page("editor", "password")) }
-        MenuTile("Draft lokal", "${drafts.size} draft belum terkirim") { open(Page("drafts")) }
-        MenuTile("Laporan", "Unduh dan bagikan data") { open(Page("reports")) }
-        Text("Master data", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-        ModuleTiles(listOf(Modules.categories, Modules.characteristics, Modules.types, Modules.vendors), user, open)
-        ModuleTiles(Modules.all.filter { it.key in listOf("users", "roles") }, user, open)
+        SectionHeading("Akun dan penyimpanan")
+        MenuTile("Profil", user.user.text("email"), Icons.Default.Person) { open(Page("detail", "profile")) }
+        MenuTile("Ganti password", "Kelola keamanan akun", Icons.Default.Lock) { model.openEditor(Modules.password); open(Page("editor", "password")) }
+        MenuTile("Draft lokal", "${drafts.size} draft belum terkirim", Icons.Default.EditNote) { open(Page("drafts")) }
+        MenuTile("Laporan", "Unduh dan bagikan data", Icons.Default.Assessment) { open(Page("reports")) }
+        ModuleTiles(listOf(Modules.categories, Modules.characteristics, Modules.types, Modules.vendors) +
+            Modules.all.filter { it.key in listOf("users", "roles") }, user, open, "Master data")
+        SectionHeading("Aplikasi")
         MenuTile("Tentang aplikasi", "Informasi WASPRO Mobile") { open(Page("about")) }
         OutlinedButton(onClick = { logout = true }, modifier = Modifier.fillMaxWidth()) { Text("Keluar akun") }
     }
@@ -276,22 +282,37 @@ private fun MoreScreen(model: WasproViewModel, user: UserContext, open: (Page) -
 }
 
 @Composable
-private fun ModuleTiles(modules: List<ModuleSpec>, user: UserContext, open: (Page) -> Unit) {
-    modules.filter { Modules.visible(it, user) }.forEach { module ->
-        MenuTile(module.title, if (module == Modules.hauling) "Backlog dan riwayat pengangkutan" else "Lihat data dan tindakan tersedia") { open(Page("list", module.key)) }
+private fun ModuleTiles(modules: List<ModuleSpec>, user: UserContext, open: (Page) -> Unit, heading: String? = null) {
+    val visible = modules.filter { Modules.visible(it, user) }
+    if (heading != null && visible.isNotEmpty()) SectionHeading(heading)
+    visible.forEach { module ->
+        val (icon, description) = when (module) {
+            Modules.waste -> Icons.Default.Inventory2 to "Jenis, jumlah, dan lokasi penyimpanan"
+            Modules.hauling -> Icons.Default.LocalShipping to "Sisa limbah dan riwayat pengangkutan"
+            Modules.production -> Icons.Default.Factory to "Catatan produksi material"
+            Modules.utilization -> Icons.Default.Recycling to "Pemanfaatan internal dan eksternal"
+            Modules.adjustments -> Icons.Default.Tune to "Koreksi jumlah material"
+            Modules.periods -> Icons.AutoMirrored.Filled.FactCheck to "Status persetujuan per periode"
+            else -> Icons.Default.Folder to ""
+        }
+        MenuTile(module.title, description, icon) { open(Page("list", module.key)) }
     }
 }
 
 @Composable
-private fun MenuTile(title: String, description: String, click: () -> Unit) {
-    Card(onClick = click, modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun MenuTile(title: String, description: String, icon: ImageVector? = null, click: () -> Unit) {
+    Card(onClick = click, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (icon != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                Icon(icon, null, Modifier.padding(10.dp).size(22.dp), tint = MaterialTheme.colorScheme.primary)
+            }
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (description.isNotBlank()) Text(description, Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Default.ChevronRight, null)
+            Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -303,10 +324,11 @@ private fun ScrollContent(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun DataPanel(page: Page, path: String, model: WasproViewModel, filters: List<String> = emptyList(), content: @Composable ColumnScope.(ScreenData) -> Unit) {
+private fun DataPanel(page: Page, path: String, model: WasproViewModel, filters: List<String> = emptyList(),
+    header: @Composable ColumnScope.() -> Unit = {}, content: @Composable ColumnScope.(ScreenData) -> Unit) {
     val key = page.toString()
     val screens by model.screens.collectAsStateWithLifecycle()
-    val state = screens[key] ?: ScreenData()
+    val state = screens[key] ?: ScreenData(loading = true)
     val options by model.lookups.collectAsStateWithLifecycle()
     var filterJson by rememberSaveable { mutableStateOf("{}") }
     val query = wireJson.parseToJsonElement(filterJson).jsonObject.mapValues { it.value.jsonPrimitive.content }
@@ -315,6 +337,7 @@ private fun DataPanel(page: Page, path: String, model: WasproViewModel, filters:
         if (filters.any { it in lookupFilters }) model.loadOptions()
     }
     ScrollContent {
+        header()
         FilterFields(filters, query, options) { filterJson = jsonObject(it).toString(); model.load(key, path, it) }
         StateHeader(state) { model.load(key, path, query) }
         if (state.data != JsonNull) content(state)
@@ -324,12 +347,33 @@ private fun DataPanel(page: Page, path: String, model: WasproViewModel, filters:
 @Composable
 private fun StateHeader(state: ScreenData, refresh: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(state.cachedAt?.let { "Data tersimpan · ${timeText(it)}" } ?: "Diperbarui · ${timeText(state.loadedAt)}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-        TextButton(onClick = refresh, enabled = !state.loading) { Icon(Icons.Default.Refresh, null); Text("Muat ulang") }
+        val status = when {
+            state.loading -> "Memuat data…"
+            state.cachedAt != null -> "Data tersimpan · ${timeText(state.cachedAt)}"
+            state.failure != null -> "Pembaruan gagal"
+            else -> "Diperbarui · ${timeText(state.loadedAt)}"
+        }
+        Text(status, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = refresh, enabled = !state.loading) {
+            Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Muat ulang")
+        }
     }
     if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-    state.failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    if (!state.loading && state.failure == null && (state.data == JsonNull || state.data == JsonArray(emptyList()))) Text("Belum ada data.")
+    state.failure?.let {
+        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
+            Text(it, Modifier.fillMaxWidth().padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    if (!state.loading && state.failure == null && (state.data == JsonNull || state.data == JsonArray(emptyList()))) {
+        FormPanel {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Default.Inbox, null, tint = MaterialTheme.colorScheme.primary)
+                Text("Belum ada data.", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
 }
 
 @Composable
@@ -358,7 +402,7 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
     val path = page.path.ifBlank { module.path }
     val key = page.toString()
     val screens by model.screens.collectAsStateWithLifecycle()
-    val state = screens[key] ?: ScreenData()
+    val state = screens[key] ?: ScreenData(loading = true)
     val options by model.lookups.collectAsStateWithLifecycle()
     var filterJson by rememberSaveable { mutableStateOf("{}") }
     val query = wireJson.parseToJsonElement(filterJson).jsonObject.mapValues { it.value.jsonPrimitive.content } +
