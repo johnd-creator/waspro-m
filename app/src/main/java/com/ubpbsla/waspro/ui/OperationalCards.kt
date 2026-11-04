@@ -77,9 +77,9 @@ internal fun DashboardSummary(element: JsonElement) {
             val columns = (maxWidth.value / (110f * LocalDensity.current.fontScale)).toInt().coerceIn(1, 3)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 metrics.chunked(columns).forEach { group ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         group.forEach { (title, value) ->
-                            Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
+                            Surface(Modifier.weight(1f).fillMaxHeight(), shape = MaterialTheme.shapes.medium,
                                 color = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

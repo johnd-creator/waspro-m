@@ -199,10 +199,21 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
             LandscapeHeader("RUANG KERJA", "Halo, ${user.user.text("name")}",
                 listOf(user.organization.text("name"), user.raw.obj("role").text("name")).filter(String::isNotBlank).joinToString(" · "))
             val showWaste = Modules.visible(Modules.waste, user)
-            if (showWaste || user.can("faba_dashboard.view")) SectionHeading("Akses cepat")
-            if (showWaste) MenuTile("Catatan limbah", "Input dan pantau penyimpanan limbah", Icons.Default.Inventory2) { open(Page("list", "waste")) }
-            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Saldo, produksi dan kapasitas TPS", Icons.Default.Factory) {
-                open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
+            if (showWaste || user.can("faba_dashboard.view")) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (showWaste) FilledTonalButton(onClick = { open(Page("list", "waste")) }) {
+                        Icon(Icons.Default.Inventory2, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Catatan limbah")
+                    }
+                    if (user.can("faba_dashboard.view")) OutlinedButton(onClick = {
+                        open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
+                    }) {
+                        Icon(Icons.Default.Factory, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Dashboard FABA")
+                    }
+                }
             }
             SectionHeading("Ringkasan operasional")
         }) { state ->
@@ -248,6 +259,13 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
         "editor" -> EditorScreen(model, module!!, back)
         "drafts" -> {
             val drafts by model.drafts.collectAsStateWithLifecycle()
+            var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+            drafts.find { it.id == deleteId }?.let { draft ->
+                AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Hapus draft lokal?") },
+                    text = { Text("Isian ${Modules.find(draft.module).title} yang disimpan di perangkat akan dihapus.") },
+                    confirmButton = { TextButton(onClick = { model.removeDraft(draft); deleteId = null }) { Text("Hapus draft") } },
+                    dismissButton = { TextButton(onClick = { deleteId = null }) { Text("Batal") } })
+            }
             ScrollContent {
                 SectionHeading("Tersimpan di perangkat")
                 if (drafts.isEmpty()) InfoPanel(Icons.Default.EditNote, "Belum ada draft lokal.", "Formulir yang disimpan di perangkat akan muncul di sini.")
@@ -259,7 +277,7 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
                         Text("Terakhir diedit · ${timeText(draft.updatedAt)}", style = MaterialTheme.typography.bodySmall)
                         Row {
                             TextButton(onClick = { model.openEditor(spec, savedDraft = draft); open(Page("editor", spec.key, id = draft.id)) }) { Text("Buka") }
-                            TextButton(onClick = { model.removeDraft(draft) }) { Text("Hapus") }
+                            TextButton(onClick = { deleteId = draft.id }) { Text("Hapus") }
                         }
                     }
                 }
@@ -466,13 +484,12 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
             val statusKey = movement?.approvalStatus.orEmpty().ifBlank { item.text("approval_status").ifBlank { item.text("status") } }
             val statusText = item.text("status_label").ifBlank { statuses[statusKey] ?: statusKey }
             val amount = listOf(quantityText, item.text("unit")).filter(String::isNotBlank).joinToString(" ")
-            val domainSummary = when {
-                module == Modules.hauling && page.path.isBlank() -> runCatching { HaulingBacklogDto.from(item) }.getOrNull()?.let {
+            val domainSummary = if (module == Modules.hauling && page.path.isBlank()) {
+                runCatching { HaulingBacklogDto.from(item) }.getOrNull()?.let {
                     "$summary · Sisa ${it.remaining.toPlainString()} · Reservasi ${it.reserved.toPlainString()}"
                 }
-                else -> null
-            } ?: summary
-            RecordCard(title, domainSummary.trim(' ', '·'), amount, statusKey, statusText) {
+            } else null
+            RecordCard(title, (domainSummary ?: summary).trim(' ', '·'), amount, statusKey, statusText) {
                 val id = if (module == Modules.periods) "${item.text("year")}/${item.text("month")}" else item.text("id")
                 val detailPath = when {
                     module == Modules.hauling && page.path.isBlank() -> "waste-haulings/history/$id"
