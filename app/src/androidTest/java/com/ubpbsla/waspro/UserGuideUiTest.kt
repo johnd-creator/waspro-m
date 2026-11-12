@@ -1,6 +1,11 @@
 package com.ubpbsla.waspro
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
@@ -18,6 +23,10 @@ class UserGuideUiTest {
     @get:Rule val compose = createComposeRule()
     private val operator = UserContext(Json.parseToJsonElement("""{"user":{"id":"guide-demo"},"role":{"slug":"operator","name":"Operator"},"permissions":[]}""").jsonObject)
 
+    @Composable private fun TestSurface(content: @Composable () -> Unit) {
+        MaterialTheme { Surface(Modifier.fillMaxSize().safeDrawingPadding()) { content() } }
+    }
+
     private fun capture(name: String) {
         if (InstrumentationRegistry.getArguments().getString("wasproGuideCapture") != "true") return
         compose.waitForIdle()
@@ -29,13 +38,14 @@ class UserGuideUiTest {
 
     @Test fun roleSearchEmptyResetAndOpenAreReadOnly() {
         var opened = ""
-        compose.setContent { MaterialTheme { GuideIndex(operator) { opened = it } } }
+        compose.setContent { TestSurface { GuideIndex(operator) { opened = it } } }
         compose.onNodeWithText("Operator", substring = false).assertIsSelected()
         capture("index")
         compose.onNodeWithText("Cari kasus atau kendala").performTextInput("Tinjau dan putuskan")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Kasus tidak ditemukan"))
         compose.onNodeWithText("Kasus tidak ditemukan").assertIsDisplayed()
-        compose.onNodeWithText("Reset pencarian dan role").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Reset pencarian dan role"))
+        compose.onNodeWithText("Reset pencarian dan role").assertIsDisplayed().performClick()
         compose.onNodeWithText("Semua role").assertIsSelected()
         compose.onNodeWithText("Cari kasus atau kendala").performTextInput("Tinjau dan putuskan")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Tinjau dan putuskan pengajuan"))
@@ -44,7 +54,7 @@ class UserGuideUiTest {
     }
 
     @Test fun detailScreenshotCloseAndBackKeepTheCase() {
-        compose.setContent { MaterialTheme { GuideDetail("review") } }
+        compose.setContent { TestSurface { GuideDetail("review") } }
         compose.onNodeWithText("Tinjau dan putuskan pengajuan").assertIsDisplayed()
         capture("case")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Buka screenshot"))
@@ -64,7 +74,7 @@ class UserGuideUiTest {
     }
 
     @Test fun unknownCaseHasRecoverableMessage() {
-        compose.setContent { MaterialTheme { GuideDetail("not-a-case") } }
+        compose.setContent { TestSurface { GuideDetail("not-a-case") } }
         compose.onNodeWithText("Panduan tidak ditemukan. Kembali ke daftar kasus.").assertIsDisplayed()
     }
 }

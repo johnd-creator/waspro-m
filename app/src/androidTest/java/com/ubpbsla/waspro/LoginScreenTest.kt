@@ -1,6 +1,8 @@
 package com.ubpbsla.waspro
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.ubpbsla.waspro.ui.LoginScreen
@@ -13,18 +15,18 @@ class LoginScreenTest {
     @Test fun loginRequiresCredentialsAndSubmitsEnteredValues() {
         var email = ""
         var password = ""
-        compose.setContent { MaterialTheme { LoginScreen(false) { first, second -> email = first; password = second } } }
+        compose.setContent { MaterialTheme { LoginScreen(false, Modifier.safeDrawingPadding()) { first, second -> email = first; password = second } } }
         compose.onNodeWithText("Masuk").assertIsNotEnabled()
         compose.onNodeWithText("Email").performTextInput("operator@example.test")
         compose.onNodeWithText("Password", substring = false).performTextInput("test-password")
-        compose.onNodeWithText("Masuk").performClick()
+        compose.onNodeWithText("Masuk").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
         assertEquals("operator@example.test", email)
         assertEquals("test-password", password)
     }
 
     @Test fun keyboardNextMovesToPasswordAndDoneSubmits() {
         var submitted = false
-        compose.setContent { MaterialTheme { LoginScreen(false) { _, _ -> submitted = true } } }
+        compose.setContent { MaterialTheme { LoginScreen(false, Modifier.safeDrawingPadding()) { _, _ -> submitted = true } } }
         compose.onNodeWithText("Email").performTextInput("operator@example.test")
         compose.onNodeWithText("Email").performImeAction()
         compose.onNodeWithText("Password").assertIsFocused().performTextInput("test-password")

@@ -58,3 +58,8 @@ Pengujian baru: `UserGuideTest` memeriksa kelengkapan, role, pencarian, fallback
 - `git diff --check`: lulus.
 
 Log dan bukti lokal berada pada `.work/guide-nov11/`: `production-final.log`, `development-guide.log`, `compact-guide.log`, `mobile-index.png`, `mobile-case.png`, `compact-index.png`, `compact-case.png`. Folder `.work` tidak dikirim ke Git. APK debug tersedia pada jalur output Gradle standar. Pengujian ini tidak mengklaim seluruh modul/peran telah UAT, perangkat fisik telah diuji, atau release telah didistribusikan.
+### Regresi tambahan dan viewport CI
+
+- Seluruh suite development pada fixture DEMO: 25 lulus, 1 dilewati karena membutuhkan backend disposable nyata (`development-regression.log`).
+- CI pertama mengungkap dua tes komponen mengetuk tombol di luar viewport 320×640 (submit login dan reset panduan). Harness kini memakai safe drawing insets serta menggulir tombol tujuan dan memastikan terlihat sebelum mengetuk; tidak mengubah perilaku aplikasi untuk meloloskan tes.
+- Uji ulang kedua kelas pada API36, ukuran 320×640 piksel/density 160: 5/5 lulus. Build/lint/20 unit test juga lulus (`ci-viewport-fix.log`).
