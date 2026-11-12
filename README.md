@@ -44,6 +44,24 @@ Pengujian end-to-end perangkat memakai tests/Support/mobile-uat-fixture.php di b
 
 Alur ini menguji operator membuat/mengajukan limbah lalu supervisor menyetujui. Pada pengujian productionDebug biasa, test tersebut dilewati karena membutuhkan fixture lokal. Pengujian login UI dan persistensi draft berjalan tanpa server.
 
+## Pemeriksaan visual lokal
+
+`tools/ui_fixture.py` menyediakan data sintetis berlabel DEMO di loopback port 8798.
+Fixture ini hanya untuk rendering, navigasi, validasi form, dan draft; bukan pengganti
+pengujian kontrak/otorisasi backend. Tidak terhubung ke server WASPRO dan menolak
+mutasi catatan. Gunakan emulator, bukan akun atau perangkat operasional.
+
+```powershell
+python tools/ui_fixture.py
+adb reverse tcp:8798 tcp:8798
+.\gradlew.bat :app:connectedDevelopmentDebugAndroidTest '-PdevelopmentApiUrl=http://127.0.0.1:8798/api/v1/' '-Pandroid.testInstrumentationRunnerArguments.wasproVisualFixture=true' '-Pandroid.testInstrumentationRunnerArguments.wasproCapture=modern' '-Pandroid.testInstrumentationRunnerArguments.class=com.ubpbsla.waspro.ModernUiTest'
+```
+
+Screenshot berasal dari aplikasi sebenarnya dan disimpan di `/data/local/tmp/waspro-modern-*.png`
+pada emulator. Ulangi dengan ukuran layar/font berbeda dan mode gelap. Test hanya
+membersihkan draft miliknya yang bertanda `Uji tampilan lokal` pada scope fixture
+`development|ui-demo|ui-demo`; data akun lain tidak disentuh.
+
 ## Signing internal
 
 Keystore release disediakan pemilik aplikasi dan disimpan di luar repositori. Sediakan environment variable pada proses build.
@@ -57,3 +75,15 @@ Keystore release disediakan pemilik aplikasi dan disimpan di luar repositori. Se
 ```
 
 Gunakan keystore yang sama untuk pembaruan aplikasi berikutnya. CI verifikasi hanya mengunggah laporan pengujian. APK yang terhubung production didistribusikan lewat kanal internal. Signing dan UAT organisasi diperlukan sebelum rilis internal.
+
+## Audit UI/UX lanjutan
+
+Lihat [temuan, cakupan QA, dan panduan demo aman](docs/ui-ux-audit-2026-11-10.md). Pengujian native menggunakan Compose instrumentation; fixture DEMO tetap terpisah dari transaksi operasional.
+
+## Polish visual lanjutan
+
+Lihat [perubahan visual, rujukan desain, dan verifikasi](docs/ui-polish-2026-11-11.md).
+
+## Panduan per role dan kasus
+
+Buka **Lainnya → Panduan penggunaan** untuk 15 kasus operasional, filter role, pencarian, dan empat screenshot native DEMO yang tersedia di perangkat. Lihat [cakupan, sumber kontrak, screenshot, dan batasan mobile](docs/user-guide-mobile.md). Panduan tidak mengganti permission akun atau menambahkan fitur backend.

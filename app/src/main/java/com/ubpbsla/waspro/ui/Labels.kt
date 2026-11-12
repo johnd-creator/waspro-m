@@ -45,8 +45,15 @@ val labels = mapOf(
     "search" to "Cari nomor / jenis / sumber", "vendor_id" to "Vendor", "set_at" to "Diatur pada", "set_by_user" to "Pengatur",
 )
 fun label(key: String) = labels[key] ?: key.replace('_', ' ').replaceFirstChar(Char::uppercase)
+
+/** API decimal strings and JSON numbers use the same local display, never a missing-value zero. */
+internal fun formatMetric(value: String): String? = value.toBigDecimalOrNull()?.let { number ->
+    java.text.NumberFormat.getNumberInstance(java.util.Locale.forLanguageTag("id-ID")).apply {
+        maximumFractionDigits = number.scale().coerceIn(0, 20)
+    }.format(number)
+}
 val statuses = mapOf(
-    "draft" to "Draft", "pending_approval" to "Menunggu persetujuan", "submitted" to "Diajukan",
+    "draft" to "Draft", "pending_approval" to "Menunggu persetujuan", "pending_review" to "Menunggu persetujuan", "submitted" to "Diajukan",
     "approved" to "Disetujui", "rejected" to "Ditolak", "cancelled" to "Dibatalkan",
     "production" to "Produksi", "workshop" to "Workshop", "reject" to "Reject", "disposal_pok" to "Disposal POK",
     "utilization_external" to "Pemanfaatan eksternal", "utilization_internal" to "Pemanfaatan internal",

@@ -79,9 +79,21 @@ object Modules {
         (module == waste && user.can("waste_records.view_all")) || (module == hauling && user.can("waste_hauling.view_all"))
 }
 
+/** One definition drives visible fields, required labels, validation and submitted payload. */
+fun isApplicableField(module: ModuleSpec, field: InputField, values: Map<String, String>): Boolean =
+    module != Modules.utilization || when (field.key) {
+        "vendor_id", "document_number", "document_date" -> values["movement_type"] == "utilization_external"
+        "internal_destination_id" -> values["movement_type"] != "utilization_external"
+        else -> true
+    }
+
+fun effectiveField(module: ModuleSpec, field: InputField, values: Map<String, String>): InputField =
+    if (module == Modules.utilization && field.key in listOf("vendor_id", "document_number", "document_date", "internal_destination_id"))
+        field.copy(required = isApplicableField(module, field, values)) else field
+
 fun validateForm(module: ModuleSpec, values: Map<String, String>, hasAttachment: Boolean): Map<String, String> {
     val errors = mutableMapOf<String, String>()
-    module.fields.forEach { field ->
+    module.fields.filter { isApplicableField(module, it, values) }.map { effectiveField(module, it, values) }.forEach { field ->
         val value = values[field.key].orEmpty().trim()
         if (field.required && value.isBlank()) errors[field.key] = "${field.label} wajib diisi."
         if (value.isNotBlank() && field.kind in listOf(FieldKind.Decimal, FieldKind.Integer)) {
@@ -103,4 +115,10 @@ fun validateForm(module: ModuleSpec, values: Map<String, String>, hasAttachment:
     }
     if (module == Modules.password && values["password"] != values["password_confirmation"]) errors["password_confirmation"] = "Konfirmasi password tidak sesuai."
     return errors
+}
+
+/** Optional filters remain optional; populated periods must be meaningful before a request. */
+fun validatePeriodFilters(values: Map<String, String>): Map<String, String> = buildMap {
+    values["year"]?.takeIf(String::isNotBlank)?.let { if (it.toIntOrNull() !in 2000..2100) put("year", "Gunakan tahun 2000–2100.") }
+    values["month"]?.takeIf(String::isNotBlank)?.let { if (it.toIntOrNull() !in 1..12) put("month", "Gunakan bulan 1–12.") }
 }

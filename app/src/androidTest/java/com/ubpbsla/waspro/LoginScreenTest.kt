@@ -21,4 +21,14 @@ class LoginScreenTest {
         assertEquals("operator@example.test", email)
         assertEquals("test-password", password)
     }
+
+    @Test fun keyboardNextMovesToPasswordAndDoneSubmits() {
+        var submitted = false
+        compose.setContent { MaterialTheme { LoginScreen(false) { _, _ -> submitted = true } } }
+        compose.onNodeWithText("Email").performTextInput("operator@example.test")
+        compose.onNodeWithText("Email").performImeAction()
+        compose.onNodeWithText("Password").assertIsFocused().performTextInput("test-password")
+        compose.onNodeWithText("Password").performImeAction()
+        compose.runOnIdle { org.junit.Assert.assertTrue(submitted) }
+    }
 }

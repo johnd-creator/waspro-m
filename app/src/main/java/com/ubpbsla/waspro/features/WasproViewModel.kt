@@ -26,7 +26,7 @@ data class ScreenData(
 data class EditorState(
     val module: String, val draft: Draft?, val values: Map<String, String>,
     val errors: Map<String, String> = emptyMap(), val existingAttachment: Boolean = false,
-    val saved: Boolean = false,
+    val saved: Boolean = false, val hasChanges: Boolean = false,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -48,6 +48,14 @@ class WasproViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     private val draftMutex = Mutex()
     private var saving: Job? = null
+    private val loadRequests = mutableMapOf<String, String>()
+    private data class ScreenQuery(val path: String, val filters: Map<String, String>)
+    private val screenQueries = mutableMapOf<String, ScreenQuery>()
+    private data class EditorRequest(
+        val scope: String, val module: ModuleSpec, val record: JsonObject?,
+        val savedDraft: Draft?, val initial: Map<String, String>,
+    )
+    private var editorRequest: EditorRequest? = null
 
     init {
         viewModelScope.launch {
@@ -77,26 +85,44 @@ class WasproViewModel @Inject constructor(
         }
     }
     fun login(email: String, password: String) = runOperation {
-        repository.login(email, password)
+        // Identity publication can immediately start the home request. Invalidate old
+        // state before that publication, never after the new screen has begun loading.
+        editorRequest = null
+        loadRequests.clear()
+        screenQueries.clear()
         screens.value = emptyMap()
         lookups.value = JsonObject(emptyMap())
         editor.value = null
+        repository.login(email, password)
     }
     fun logout() = runOperation {
         saving?.cancelAndJoin()
         persistEditor()
         draftMutex.withLock { repository.logout() }
+        editorRequest = null
+        loadRequests.clear()
+        screenQueries.clear()
         lookups.value = JsonObject(emptyMap())
         screens.value = emptyMap()
         editor.value = null
     }
     fun load(key: String, path: String, filters: Map<String, String> = emptyMap(), append: Boolean = false) {
-        screens.value = screens.value + (key to (screens.value[key] ?: ScreenData()).copy(loading = true, failure = null))
+        val requestId = UUID.randomUUID().toString()
+        val requestScope = repository.scope
+        loadRequests[key] = requestId
+        // Page numbers identify an append request, not a different filter selection.
+        val query = ScreenQuery(path, filters.filterKeys { it != "page" }.toMap())
+        val changedQuery = screenQueries[key] != query
+        screenQueries[key] = query
+        val previous = screens.value[key]
+        val loading = if (changedQuery || previous == null) ScreenData(loading = true)
+            else previous.copy(loading = true, failure = null)
+        screens.value = screens.value + (key to loading)
         viewModelScope.launch {
             val identityId = user.value?.id
             try {
                 val result = repository.load(path, filters)
-                if (user.value?.id != identityId) return@launch
+                if (user.value?.id != identityId || repository.scope != requestScope || loadRequests[key] != requestId) return@launch
                 val previous = screens.value[key]?.data as? JsonArray
                 val items = result.page.data as? JsonArray
                 val data = if (append && previous != null && items != null) JsonArray((previous + items).distinctBy {
@@ -105,6 +131,7 @@ class WasproViewModel @Inject constructor(
                 screens.value = screens.value + (key to ScreenData(data, result.page.meta, cachedAt = result.cachedAt))
             } catch (failure: CancellationException) { throw failure }
             catch (failure: Exception) {
+                if (repository.scope != requestScope || loadRequests[key] != requestId) return@launch
                 screens.value = screens.value + (key to (screens.value[key] ?: ScreenData()).copy(loading = false, failure = readable(failure)))
                 if (failure is ApiFailure && failure.status == 403) runCatching { repository.refreshIdentity() }
             }
@@ -128,12 +155,16 @@ class WasproViewModel @Inject constructor(
         }
     }
     fun openEditor(module: ModuleSpec, record: JsonObject? = null, savedDraft: Draft? = null, initial: Map<String, String> = emptyMap()) {
-        saving?.cancel()
-        editor.value = null
-        conflict.value = null
         runOperation {
+            editorRequest = EditorRequest(repository.scope, module, record, savedDraft, initial.toMap())
+            saving?.cancelAndJoin()
+            persistEditor()
+            require(savedDraft == null || savedDraft.scope == repository.scope) { "Draft berasal dari konteks akun lain." }
+            val latestDraft = savedDraft?.let { repository.database.dao().draft(it.scope, it.id) ?: it }
+            editor.value = null
+            conflict.value = null
             if (module.fields.any { it.lookup != null }) refreshLookups()
-            val values = savedDraft?.let { wireJson.parseToJsonElement(it.payload).jsonObject.mapValues { entry -> entry.value.jsonPrimitive.content } }
+            val values = latestDraft?.let { wireJson.parseToJsonElement(it.payload).jsonObject.mapValues { entry -> entry.value.jsonPrimitive.content } }
                 ?: module.fields.associate { field ->
                     field.key to (record?.text(field.key)?.takeIf(String::isNotBlank) ?: when {
                         field.kind == FieldKind.Boolean -> "true"
@@ -143,10 +174,10 @@ class WasproViewModel @Inject constructor(
                         field.key == "unit" && module.key in listOf("production", "utilization", "adjustments") -> "ton"
                         else -> ""
                     })
-                } + initial + mapOf("_has_attachment" to (savedDraft?.let { wireJson.parseToJsonElement(it.payload).jsonObject.text("_has_attachment") }
+                } + initial + mapOf("_has_attachment" to (latestDraft?.let { wireJson.parseToJsonElement(it.payload).jsonObject.text("_has_attachment") }
                     ?: (record?.text("attachment_path")?.isNotBlank() == true).toString()))
             val persistent = module !in listOf(Modules.password, Modules.profile)
-            val draft = savedDraft ?: if (persistent) Draft(
+            val draft = latestDraft ?: if (persistent) Draft(
                 repository.scope, UUID.randomUUID().toString(), module.key, record?.text("id")?.takeIf(String::isNotBlank),
                 jsonObject(values).toString(), null, UUID.randomUUID().toString(),
                 record?.text("resource_version")?.takeIf(String::isNotBlank), System.currentTimeMillis(),
@@ -154,28 +185,55 @@ class WasproViewModel @Inject constructor(
             editor.value = EditorState(module.key, draft, values, existingAttachment = values["_has_attachment"] == "true")
         }
     }
+    fun retryOpenEditor() {
+        val request = editorRequest ?: return
+        if (user.value == null || request.scope != repository.scope) {
+            editorRequest = null
+            message.value = "Konteks akun berubah. Buka kembali formulir dari modul."
+            return
+        }
+        openEditor(request.module, request.record, request.savedDraft, request.initial)
+    }
+
+    /** Flush before navigation, including edits still within the autosave debounce. */
+    fun leaveEditor(onClosed: () -> Unit) = runOperation {
+        saving?.cancelAndJoin()
+        persistEditor()
+        editor.value = null
+        editorRequest = null
+        conflict.value = null
+        onClosed()
+    }
+
     fun change(key: String, value: String) {
         val current = editor.value ?: return
         if (current.draft?.submittedPayload != null) return
-        editor.value = current.copy(values = current.values + (key to value), errors = current.errors - key, saved = false)
+        editor.value = current.copy(values = current.values + (key to value), errors = current.errors - key, saved = false, hasChanges = true)
         saving?.cancel()
         saving = viewModelScope.launch { delay(250); persistEditor() }
     }
-    suspend fun persistEditor() = draftMutex.withLock {
+    suspend fun persistEditor(force: Boolean = false) = draftMutex.withLock {
         val current = editor.value ?: return@withLock
         val draft = current.draft ?: return@withLock
+        // Merely inspecting a new form must not create an empty local draft.
+        // Existing drafts and uncertain submissions always retain their saved state.
+        if (!force && !current.hasChanges && draft.submittedPayload == null &&
+            repository.database.dao().draft(draft.scope, draft.id) == null) return@withLock
         val updated = draft.copy(payload = jsonObject(current.values).toString(), updatedAt = System.currentTimeMillis())
         repository.database.dao().save(updated)
         if (editor.value == current) editor.value = current.copy(draft = updated, saved = true)
     }
     fun attach(uri: Uri) = runOperation {
+        saving?.cancelAndJoin()
         val current = editor.value ?: return@runOperation
         val draft = current.draft ?: return@runOperation
+        if (draft.submittedPayload != null) return@runOperation
         val mime = context.contentResolver.getType(uri)
         val extension = mapOf("application/pdf" to "pdf", "image/jpeg" to "jpg", "image/png" to "png", "image/webp" to "webp")[mime]
             ?: throw IllegalArgumentException("Pilih JPG, PNG, WEBP atau PDF.")
         val folder = repository.draftDirectory.apply { mkdirs() }
-        val file = folder.resolve("${draft.id}.$extension")
+        // Keep the last valid attachment intact until its replacement is fully saved.
+        val file = folder.resolve("${draft.id}-${UUID.randomUUID()}.$extension")
         try {
             context.contentResolver.openInputStream(uri)!!.use { input ->
                 file.outputStream().use { output ->
@@ -191,12 +249,12 @@ class WasproViewModel @Inject constructor(
                 }
             }
         } catch (failure: Exception) { file.delete(); throw failure }
-        current.draft.attachment?.takeIf { it != file.path }?.let { File(it).delete() }
-        editor.value = current.copy(draft = draft.copy(attachment = file.path), errors = current.errors - "attachment")
+        editor.value = current.copy(draft = draft.copy(attachment = file.path), errors = current.errors - "attachment", hasChanges = true)
         persistEditor()
+        current.draft.attachment?.takeIf { it != file.path }?.let { File(it).delete() }
     }
     fun submitEditor(onSuccess: (JsonObject) -> Unit) = runOperation {
-        saving?.cancel()
+        saving?.cancelAndJoin()
         val current = editor.value ?: return@runOperation
         val module = Modules.find(current.module)
         val errors = validateForm(module, current.values, current.draft?.attachment != null || current.existingAttachment)
@@ -204,7 +262,7 @@ class WasproViewModel @Inject constructor(
             editor.value = current.copy(errors = errors)
             return@runOperation
         }
-        persistEditor()
+        persistEditor(force = true)
         repository.refreshIdentity()
         val actor = user.value ?: return@runOperation
         if (current.draft?.recordId == null && module.createPermission != null) require(actor.can(module.createPermission)) { "Izin input sudah berubah." }
@@ -225,7 +283,7 @@ class WasproViewModel @Inject constructor(
             module.fields.forEach { field ->
                 val value = canonical[field.key].orEmpty()
                 put(field.key, when {
-                    value.isBlank() -> JsonNull
+                    !isApplicableField(module, field, current.values) || value.isBlank() -> JsonNull
                     field.kind == FieldKind.Boolean -> JsonPrimitive(value.toBoolean())
                     else -> JsonPrimitive(value)
                 })
@@ -254,6 +312,9 @@ class WasproViewModel @Inject constructor(
                 it.attachment?.let { path -> File(path).delete() }
             }
             editor.value = null
+            editorRequest = null
+            loadRequests.clear()
+            screenQueries.clear()
             screens.value = emptyMap()
             message.value = "Data berhasil disimpan."
             onSuccess(result.data.objectOrEmpty())
@@ -282,12 +343,20 @@ class WasproViewModel @Inject constructor(
         conflict.value = null
     }
     fun removeDraft(draft: Draft) = runOperation {
+        if (editor.value?.draft?.let { it.scope == draft.scope && it.id == draft.id } == true) {
+            saving?.cancelAndJoin()
+            editor.value = null
+            editorRequest = null
+            conflict.value = null
+        }
         repository.database.dao().deleteDraft(draft.scope, draft.id)
         draft.attachment?.let { File(it).delete() }
     }
     fun action(path: String, action: String, fields: Map<String, String>, requestKey: String, completed: () -> Unit) = runOperation {
         repository.refreshIdentity()
         repository.mutate(path, if (action == "delete") "DELETE" else "POST", jsonObject(fields), requestKey)
+        loadRequests.clear()
+        screenQueries.clear()
         screens.value = emptyMap()
         message.value = "Tindakan berhasil diproses."
         completed()

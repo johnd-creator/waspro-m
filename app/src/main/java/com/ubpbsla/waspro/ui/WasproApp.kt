@@ -3,8 +3,33 @@
 package com.ubpbsla.waspro.ui
 
 import android.content.Intent
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.foundation.ScrollState
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.stateDescription
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -15,8 +40,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.FactCheck
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.FactCheck
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -25,6 +55,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -61,20 +98,24 @@ fun WasproApp(model: WasproViewModel) {
     val snackbar = remember { SnackbarHostState() }
     val backStack = rememberNavBackStack(Page("home"))
     LaunchedEffect(identity?.id) { backStack.clear(); backStack.add(Page("home")) }
-    LaunchedEffect(message) {
+    LaunchedEffect(message, identity?.id) {
+        if (identity == null) return@LaunchedEffect
         message?.let { snackbar.showSnackbar(it); model.message.value = null }
     }
-    MaterialTheme(colorScheme = FieldColors, shapes = FieldShapes) {
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) FieldDarkColors else FieldColors, shapes = FieldShapes, typography = FieldTypography) {
         Surface(Modifier.fillMaxSize()) {
             when {
-                starting -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
+                starting -> Column(Modifier.fillMaxSize().safeDrawingPadding(), verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Image(painterResource(R.drawable.ic_waspro), "WASPRO", Modifier.size(54.dp).clip(MaterialTheme.shapes.medium))
                     Text("Menyiapkan ruang kerja…", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.titleMedium)
                     CircularProgressIndicator(Modifier.size(24.dp))
                 }
                 identity == null -> Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-                    LoginScreen(busy, Modifier.padding(padding), model::login)
+                    LoginScreen(busy, Modifier.padding(padding).consumeWindowInsets(padding), message) { email, password ->
+                        model.message.value = null
+                        model.login(email, password)
+                    }
                 }
                 else -> {
                     val user = identity!!
@@ -89,50 +130,83 @@ fun WasproApp(model: WasproViewModel) {
                             "drafts" -> "Draft lokal"
                             "reports" -> "Laporan"
                             "about" -> "Tentang aplikasi"
+                            "guide", "guide-case" -> "Panduan penggunaan"
                             else -> Modules.all.find { it.key == page.module }?.title ?: "WASPRO"
                         }
                     }
                     fun open(target: Page) {
-                        if (!busy || target.kind == "editor") backStack.add(target)
+                        if (!busy || target.kind == "editor") {
+                            if (target.kind == "approval-menu") backStack.clear()
+                            backStack.add(target)
+                        }
+                    }
+                    val wideLayout = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() >= 840.dp }
+                    val tabs = listOf("home" to "Beranda", "waste-menu" to "Limbah", "faba-menu" to "FABA") +
+                        (if (user.canReview) listOf("approval-menu" to "Tinjau") else emptyList()) + ("more" to "Lainnya")
+                    fun goBack() {
+                        if (!busy && backStack.size > 1) {
+                            if (page.kind == "editor") model.leaveEditor { backStack.removeLastOrNull() }
+                            else backStack.removeLastOrNull()
+                        }
+                    }
+                    fun selectTab(kind: String) {
+                        if (!busy) { backStack.clear(); backStack.add(Page(kind)) }
                     }
                     Scaffold(
                         snackbarHost = { SnackbarHost(snackbar) },
                         topBar = {
                             TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background), title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
-                                if (backStack.size > 1) IconButton(onClick = { backStack.removeLastOrNull() }) {
+                                if (backStack.size > 1) IconButton(onClick = { goBack() }, enabled = !busy) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
                                 } else Image(painterResource(R.drawable.ic_waspro), "WASPRO",
                                     Modifier.padding(start = 12.dp, end = 4.dp).size(32.dp).clip(RoundedCornerShape(9.dp)))
+                            }, actions = {
+                                if (BuildConfig.FLAVOR != "production") Surface(
+                                    modifier = Modifier.padding(end = 12.dp), shape = MaterialTheme.shapes.extraSmall,
+                                    color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ) { Text(if (wideLayout) BuildConfig.FLAVOR.uppercase() else BuildConfig.FLAVOR.take(3).uppercase(),
+                                    Modifier.padding(horizontal = 8.dp, vertical = 5.dp).semantics { contentDescription = "Lingkungan ${BuildConfig.FLAVOR}" },
+                                    style = MaterialTheme.typography.labelSmall) }
                             })
                         },
                         bottomBar = {
-                            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                                val tabs = listOf("home" to "Beranda", "waste-menu" to "Limbah", "faba-menu" to "FABA") +
-                                    (if (user.canReview) listOf("approval-menu" to "Persetujuan") else emptyList()) + ("more" to "Lainnya")
+                            if (page.kind != "editor" && !wideLayout) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                                 tabs.forEach { (kind, text) ->
-                                    NavigationBarItem(selected = (backStack.firstOrNull() as? Page)?.kind == kind, onClick = {
-                                        if (!busy) { backStack.clear(); backStack.add(Page(kind)) }
-                                    }, icon = {
-                                        Icon(when (kind) {
-                                            "home" -> Icons.Default.Home
-                                            "waste-menu" -> Icons.Default.Inventory2
-                                            "faba-menu" -> Icons.Default.Factory
-                                            "approval-menu" -> Icons.AutoMirrored.Filled.FactCheck
-                                            else -> Icons.Default.Menu
-                                        }, null)
-                                    }, label = { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                                    NavigationBarItem(colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer),
+                                        selected = (backStack.firstOrNull() as? Page)?.kind == kind, onClick = {
+                                        selectTab(kind)
+                                    }, enabled = !busy, icon = {
+                                        Icon(navigationIcon(kind, (backStack.firstOrNull() as? Page)?.kind == kind), null)
+                                    }, label = { Text(if (kind == "approval-menu") "Tinjau" else text, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
                                 }
                             }
                         },
                     ) { padding ->
-                        Column(Modifier.padding(padding).fillMaxSize()) {
+                        Row(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
+                            if (wideLayout && page.kind != "editor") NavigationRail(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.fillMaxHeight().width(104.dp).verticalScroll(rememberScrollState())
+                            ) {
+                                Spacer(Modifier.height(12.dp))
+                                tabs.forEach { (kind, text) ->
+                                    NavigationRailItem(selected = (backStack.firstOrNull() as? Page)?.kind == kind,
+                                        onClick = { selectTab(kind) }, enabled = !busy,
+                                        icon = { Icon(navigationIcon(kind, (backStack.firstOrNull() as? Page)?.kind == kind), null) }, label = { Text(text) })
+                                    Spacer(Modifier.height(12.dp))
+                                }
+                            }
+                            Column(Modifier.weight(1f).fillMaxHeight()) {
                             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (user.organization.text("id").isBlank()) {
                                 InfoPanel(Icons.Default.Business, "Organisasi belum tersedia", "Hubungi administrator untuk memeriksa penugasan akun Anda.")
                                 Button(onClick = model::logout) { Text("Keluar") }
                             } else NavDisplay(
                                 backStack = backStack,
-                                onBack = { if (!busy) backStack.removeLastOrNull() },
+                                onBack = { goBack() },
                                 entryProvider = entryProvider {
                                     entry<Page> { target ->
                                         key(target) {
@@ -143,6 +217,7 @@ fun WasproApp(model: WasproViewModel) {
                                     }
                                 },
                             )
+                            }
                         }
                     }
                 }
@@ -151,33 +226,59 @@ fun WasproApp(model: WasproViewModel) {
     }
 }
 
+private fun navigationIcon(kind: String, selected: Boolean = true): ImageVector = when (kind) {
+    "home" -> if (selected) Icons.Default.Home else Icons.Outlined.Home
+    "waste-menu" -> if (selected) Icons.Default.Inventory2 else Icons.Outlined.Inventory2
+    "faba-menu" -> if (selected) Icons.Default.Factory else Icons.Outlined.Factory
+    "approval-menu" -> if (selected) Icons.AutoMirrored.Filled.FactCheck else Icons.AutoMirrored.Outlined.FactCheck
+    else -> Icons.Default.Menu
+}
+
 @Composable
-fun LoginScreen(busy: Boolean, modifier: Modifier = Modifier, submit: (String, String) -> Unit) {
+fun LoginScreen(busy: Boolean, modifier: Modifier = Modifier, error: String? = null, submit: (String, String) -> Unit) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Column(Modifier.widthIn(max = 500.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            LandscapeHeader("OPERASIONAL LINGKUNGAN", "WASPRO", "Pengelolaan limbah dan FABA")
-            FormPanel {
-                Text("Masuk ke akun Anda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Masukkan email dan password akun organisasi Anda.", Modifier.padding(top = 4.dp),
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") },
-                    leadingIcon = { Icon(Icons.Default.AlternateEmail, null) },
-                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !busy)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") },
-                    leadingIcon = { Icon(Icons.Default.Lock, null) },
-                    singleLine = true, enabled = !busy,
-                    visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Sembunyikan password" else "Tampilkan password") } })
-                Spacer(Modifier.height(24.dp))
-                Button({ submit(email, password) }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy && email.isNotBlank() && password.isNotBlank()) {
-                    Text(if (busy) "Sedang masuk…" else "Masuk")
-                }
+    val focus = LocalFocusManager.current
+    val canSubmit = !busy && email.isNotBlank() && password.isNotBlank()
+    fun signIn() {
+        if (canSubmit) {
+            focus.clearFocus()
+            submit(email, password)
+        }
+    }
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).imePadding()
+        .verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.widthIn(max = 960.dp).fillMaxWidth()) { LoginMasthead() }
+        Column(Modifier.widthIn(max = 500.dp).fillMaxWidth().padding(24.dp)) {
+            Text("Masuk ke akun Anda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Masukkan email dan password akun organisasi Anda.", Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth().semantics { contentType = ContentType.EmailAddress }, label = { Text("Email") },
+                leadingIcon = { Icon(Icons.Default.AlternateEmail, null) },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }), enabled = !busy)
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth().semantics { contentType = ContentType.Password }, label = { Text("Password") },
+                leadingIcon = { Icon(Icons.Default.Lock, null) },
+                singleLine = true, enabled = !busy,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { signIn() }),
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = { IconButton(onClick = { visible = !visible }, enabled = !busy) { Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Sembunyikan password" else "Tampilkan password") } })
+            error?.let { Text(it, Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
+            Spacer(Modifier.height(24.dp))
+            Button({ signIn() }, Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = MaterialTheme.shapes.small, enabled = canSubmit) {
+                Text(if (busy) "Sedang masuk…" else "Masuk", Modifier.weight(1f))
+                if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                else Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(20.dp))
+            }
+            Row(Modifier.padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Business, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Akses sesuai peran dan organisasi Anda", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -198,23 +299,21 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
         "home" -> DataPanel(page, "dashboard", model, header = {
             LandscapeHeader("RUANG KERJA", "Halo, ${user.user.text("name")}",
                 listOf(user.organization.text("name"), user.raw.obj("role").text("name")).filter(String::isNotBlank).joinToString(" · "))
-            val showWaste = Modules.visible(Modules.waste, user)
-            if (showWaste || user.can("faba_dashboard.view")) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (showWaste) FilledTonalButton(onClick = { open(Page("list", "waste")) }) {
-                        Icon(Icons.Default.Inventory2, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Catatan limbah")
-                    }
-                    if (user.can("faba_dashboard.view")) OutlinedButton(onClick = {
-                        open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
-                    }) {
-                        Icon(Icons.Default.Factory, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Dashboard FABA")
-                    }
+            if (user.canReview) {
+                Button(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.small, onClick = { open(Page("approval-menu")) }) {
+                    Icon(Icons.AutoMirrored.Filled.FactCheck, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Tinjau pengajuan")
+                }
+            } else if (Modules.visible(Modules.waste, user) && user.can(Modules.waste.createPermission.orEmpty())) {
+                Button(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.small, onClick = { model.openEditor(Modules.waste); open(Page("editor", "waste")) }) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Catat limbah")
                 }
             }
+            val drafts by model.drafts.collectAsStateWithLifecycle()
+            if (drafts.isNotEmpty()) MenuTile("Lanjutkan draft", "${drafts.size} draft di perangkat", icon = Icons.Default.EditNote) { open(Page("drafts")) }
             SectionHeading("Ringkasan operasional")
         }) { state ->
             DashboardSummary(state.data)
@@ -226,34 +325,38 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
         }
         "faba-menu" -> ScrollContent {
             LandscapeHeader("OPERASIONAL  /  FABA", "Pusat material FABA", "Pantau produksi, pemanfaatan, dan saldo material.")
-            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Ringkasan material dan TPS", Icons.Default.Assessment) {
+            ModuleTiles(listOf(Modules.production, Modules.utilization, Modules.adjustments, Modules.periods), user, open, "Transaksi dan periode")
+            if (user.can("faba_dashboard.view")) MenuTile("Dashboard FABA", "Ringkasan material dan TPS", icon = Icons.Default.Assessment) {
                 open(Page("read", path = "faba/dashboard", title = "Dashboard FABA"))
             }
-            ModuleTiles(listOf(Modules.production, Modules.utilization, Modules.adjustments, Modules.periods), user, open, "Transaksi dan periode")
             ModuleTiles(Modules.recaps, user, open, "Rekap dan saldo")
             if (user.can("faba_opening_balance.manage")) listOf(Modules.opening, Modules.capacity).forEach {
-                MenuTile(it.title, "Pengaturan operasional") { model.openEditor(it); open(Page("editor", it.key)) }
+                MenuTile(it.title, "Pengaturan operasional", icon = Icons.Default.Tune) { model.openEditor(it); open(Page("editor", it.key)) }
             }
-            if (user.can("faba_approvals.view")) MenuTile("Riwayat FABA", "Persetujuan dan 100 aktivitas terbaru") { open(Page("read", Modules.history.key)) }
+            if (user.can("faba_approvals.view")) MenuTile("Riwayat FABA", "Persetujuan dan 100 aktivitas terbaru", icon = Icons.Default.History) { open(Page("read", Modules.history.key)) }
         }
         "approval-menu" -> ScrollContent {
             LandscapeHeader("PENGAWASAN", "Meja persetujuan", "Pilih jenis pengajuan untuk meninjau catatan dan mengambil tindakan.")
             SectionHeading("Jenis pengajuan")
-            if (user.can("waste_records.approve") || user.can("waste_records.reject")) MenuTile("Persetujuan limbah", "Catatan menunggu review") {
+            if (user.can("waste_records.approve") || user.can("waste_records.reject")) MenuTile("Persetujuan limbah", "Catatan menunggu review", icon = Icons.AutoMirrored.Filled.FactCheck) {
                 open(Page("list", "waste", path = "waste-records/pending-approval", title = "Persetujuan limbah"))
             }
-            if (user.can("waste_hauling.approve") || user.can("waste_hauling.reject")) MenuTile("Persetujuan pengangkutan", "Pengajuan angkut") {
+            if (user.can("waste_hauling.approve") || user.can("waste_hauling.reject")) MenuTile("Persetujuan pengangkutan", "Pengajuan angkut", icon = Icons.Default.LocalShipping) {
                 open(Page("list", "hauling", path = "waste-haulings/pending-approval", title = "Persetujuan angkut"))
             }
             if (user.can("faba_approvals.approve") || user.can("faba_approvals.reject")) {
-                MenuTile("Transaksi FABA", "Produksi, pemanfaatan dan penyesuaian") { open(Page("list", "production", path = "faba/movements/pending-approval", title = "Persetujuan transaksi FABA")) }
-                MenuTile("Periode FABA", "Review rekap bulanan") { open(Page("list", "periods")) }
+                MenuTile("Transaksi FABA", "Produksi, pemanfaatan dan penyesuaian", icon = Icons.Default.Factory) { open(Page("list", "production", path = "faba/movements/pending-approval", title = "Persetujuan transaksi FABA")) }
+                MenuTile("Periode FABA", "Review rekap bulanan", icon = Icons.Default.CalendarMonth) { open(Page("list", "periods")) }
             }
         }
         "more" -> MoreScreen(model, user, open)
+        "guide" -> GuideIndex(user) { open(Page("guide-case", id = it)) }
+        "guide-case" -> GuideDetail(page.id)
         "list" -> RecordList(page, module!!, model, user, open)
         "detail" -> RecordDetail(page, module!!, model, user, open, back)
-        "read" -> DataPanel(page, page.path.ifBlank { module!!.path }, model, module?.filters.orEmpty()) {
+        "read" -> DataPanel(page, page.path.ifBlank { module!!.path }, model, module?.filters.orEmpty(), header = {
+            LandscapeHeader("RINGKASAN OPERASIONAL", page.title.ifBlank { module?.title.orEmpty() }, "Periksa periode dan status pembaruan sebelum menggunakan data.")
+        }) {
             if (page.path == "faba/dashboard") DashboardSummary(it.data) else FormPanel { JsonDetails(it.data) }
         }
         "editor" -> EditorScreen(model, module!!, back)
@@ -267,7 +370,7 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
                     dismissButton = { TextButton(onClick = { deleteId = null }) { Text("Batal") } })
             }
             ScrollContent {
-                SectionHeading("Tersimpan di perangkat")
+                LandscapeHeader("PENYIMPANAN LOKAL", "Lanjutkan pekerjaan Anda", "Draft belum dikirim ke server. Buka untuk meninjau dan melanjutkan pengisian.")
                 if (drafts.isEmpty()) InfoPanel(Icons.Default.EditNote, "Belum ada draft lokal.", "Formulir yang disimpan di perangkat akan muncul di sini.")
                 else Text("${drafts.size} draft · Buka untuk melanjutkan pengisian.", style = MaterialTheme.typography.bodyMedium)
                 drafts.forEach { draft ->
@@ -276,8 +379,8 @@ private fun PageContent(page: Page, model: WasproViewModel, user: UserContext, o
                         Text(spec.title, style = MaterialTheme.typography.titleMedium)
                         Text("Terakhir diedit · ${timeText(draft.updatedAt)}", style = MaterialTheme.typography.bodySmall)
                         Row {
-                            TextButton(onClick = { model.openEditor(spec, savedDraft = draft); open(Page("editor", spec.key, id = draft.id)) }) { Text("Buka") }
-                            TextButton(onClick = { deleteId = draft.id }) { Text("Hapus") }
+                            TextButton(onClick = { model.openEditor(spec, savedDraft = draft); open(Page("editor", spec.key, id = draft.id)) }) { Text("Lanjutkan") }
+                            TextButton(onClick = { deleteId = draft.id }) { Text("Hapus", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -298,15 +401,16 @@ private fun MoreScreen(model: WasproViewModel, user: UserContext, open: (Page) -
     ScrollContent {
         LandscapeHeader("AKUN ORGANISASI", user.user.text("name"), user.organization.text("name"))
         SectionHeading("Akun dan penyimpanan")
-        MenuTile("Profil", user.user.text("email"), Icons.Default.Person) { open(Page("detail", "profile")) }
-        MenuTile("Ganti password", "Kelola keamanan akun", Icons.Default.Lock) { model.openEditor(Modules.password); open(Page("editor", "password")) }
-        MenuTile("Draft lokal", "${drafts.size} draft belum terkirim", Icons.Default.EditNote) { open(Page("drafts")) }
-        MenuTile("Laporan", "Unduh dan bagikan data", Icons.Default.Assessment) { open(Page("reports")) }
+        MenuTile("Profil", user.user.text("email"), icon = Icons.Default.Person) { open(Page("detail", "profile")) }
+        MenuTile("Ganti password", "Kelola keamanan akun", icon = Icons.Default.Lock) { model.openEditor(Modules.password); open(Page("editor", "password")) }
+        MenuTile("Draft lokal", "${drafts.size} draft belum terkirim", icon = Icons.Default.EditNote) { open(Page("drafts")) }
+        MenuTile("Laporan", "Unduh dan bagikan data", icon = Icons.Default.Assessment) { open(Page("reports")) }
         ModuleTiles(listOf(Modules.categories, Modules.characteristics, Modules.types, Modules.vendors) +
             Modules.all.filter { it.key in listOf("users", "roles") }, user, open, "Master data")
         SectionHeading("Aplikasi")
-        MenuTile("Tentang aplikasi", "Informasi WASPRO Mobile") { open(Page("about")) }
-        OutlinedButton(onClick = { logout = true }, modifier = Modifier.fillMaxWidth()) { Text("Keluar akun") }
+        MenuTile("Panduan penggunaan", "Langkah per role, kasus, dan screenshot", icon = Icons.AutoMirrored.Filled.MenuBook) { open(Page("guide")) }
+        MenuTile("Tentang aplikasi", "Informasi WASPRO Mobile", icon = Icons.Default.Info) { open(Page("about")) }
+        OutlinedButton(onClick = { logout = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.small) { Icon(Icons.AutoMirrored.Filled.Logout, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Keluar akun", color = MaterialTheme.colorScheme.error) }
     }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("Keluar akun?") },
         text = { Text(if (drafts.isEmpty()) "Sesi dan data tersimpan akan dibersihkan." else "Ada ${drafts.size} draft belum terkirim. Keluar akan menghapus draft dan lampirannya dari perangkat.") },
@@ -318,7 +422,13 @@ private fun MoreScreen(model: WasproViewModel, user: UserContext, open: (Page) -
 private fun ModuleTiles(modules: List<ModuleSpec>, user: UserContext, open: (Page) -> Unit, heading: String? = null) {
     val visible = modules.filter { Modules.visible(it, user) }
     if (heading != null && visible.isNotEmpty()) SectionHeading(heading)
-    visible.forEach { module ->
+    if (visible.isEmpty() && heading == null) InfoPanel(Icons.Default.Lock, "Belum ada modul tersedia", "Modul mengikuti hak akses akun Anda. Hubungi administrator jika akses perlu diperbarui.")
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth >= 600.dp && LocalDensity.current.fontScale < 1.3f) 2 else 1
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        visible.chunked(columns).forEach { group ->
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            group.forEach { module ->
         val (icon, description) = when (module) {
             Modules.waste -> Icons.Default.Inventory2 to "Jenis, jumlah, dan lokasi penyimpanan"
             Modules.hauling -> Icons.Default.LocalShipping to "Sisa limbah dan riwayat pengangkutan"
@@ -326,22 +436,40 @@ private fun ModuleTiles(modules: List<ModuleSpec>, user: UserContext, open: (Pag
             Modules.utilization -> Icons.Default.Recycling to "Pemanfaatan internal dan eksternal"
             Modules.adjustments -> Icons.Default.Tune to "Koreksi jumlah material"
             Modules.periods -> Icons.AutoMirrored.Filled.FactCheck to "Status persetujuan per periode"
-            else -> Icons.Default.Folder to ""
+            Modules.categories -> Icons.Default.Category to "Kelompok pengelolaan limbah"
+            Modules.characteristics -> Icons.Default.HealthAndSafety to "Sifat dan klasifikasi bahaya"
+            Modules.types -> Icons.Default.Inventory2 to "Jenis, masa simpan, dan biaya angkut"
+            Modules.vendors -> Icons.Default.LocalShipping to "Mitra, kontak, dan izin operasional"
+            else -> Icons.Default.Folder to when (module.key) {
+                "users" -> "Direktori akun organisasi"
+                "roles" -> "Peran dan rincian hak akses"
+                "recap-monthly" -> "Produksi dan pemanfaatan per bulan"
+                "recap-yearly" -> "Ringkasan material sepanjang tahun"
+                "recap-vendors" -> "Pemanfaatan melalui mitra"
+                "recap-balance" -> "Saldo dan pergerakan material"
+                "recap-stock-card" -> "Jejak transaksi stok material"
+                else -> ""
+            }
         }
-        MenuTile(module.title, description, icon) { open(Page("list", module.key)) }
+        MenuTile(module.title, description, Modifier.weight(1f).fillMaxHeight(), icon) { open(Page("list", module.key)) }
+            }
+            repeat(columns - group.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        }
     }
 }
 
 @Composable
-private fun MenuTile(title: String, description: String, icon: ImageVector? = null, click: () -> Unit) {
-    Card(onClick = click, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun MenuTile(title: String, description: String, modifier: Modifier = Modifier, icon: ImageVector? = null, click: () -> Unit) {
+    Card(onClick = click, modifier = modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Row(Modifier.padding(14.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconTile(icon ?: Icons.Default.Folder)
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (description.isNotBlank()) Text(description, Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (description.isNotBlank()) Text(description, Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -349,9 +477,10 @@ private fun MenuTile(title: String, description: String, icon: ImageVector? = nu
 }
 
 @Composable
-private fun ScrollContent(content: @Composable ColumnScope.() -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+private fun ScrollContent(modifier: Modifier = Modifier, keyboardInsets: Boolean = true, scrollState: ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth()
+            .then(if (keyboardInsets) Modifier.imePadding() else Modifier).verticalScroll(scrollState)
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
@@ -373,14 +502,21 @@ private fun DataPanel(page: Page, path: String, model: WasproViewModel, filters:
     ScrollContent {
         header()
         FilterFields(filters, query, options) { filterJson = jsonObject(it).toString(); model.load(key, path, it) }
-        StateHeader(state) { model.load(key, path, query) }
+        val summaryPage = page.kind == "home" || page.path == "faba/dashboard"
+        val needsAttention = state.loading || state.failure != null || state.cachedAt != null
+        if (!summaryPage || needsAttention) StateHeader(state) { model.load(key, path, query) }
         if (state.data != JsonNull) content(state)
+        if (summaryPage && !needsAttention) StateHeader(state) { model.load(key, path, query) }
     }
 }
 
 @Composable
-private fun StateHeader(state: ScreenData, refresh: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+internal fun StateHeader(state: ScreenData, refresh: () -> Unit) {
+    Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(when { state.cachedAt != null -> Icons.Default.CloudOff; state.failure != null -> Icons.Default.SyncProblem; else -> Icons.Default.Update },
+            null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         val status = when {
             state.loading -> "Memuat data…"
             state.cachedAt != null -> "Data tersimpan · ${timeText(state.cachedAt)}"
@@ -394,19 +530,15 @@ private fun StateHeader(state: ScreenData, refresh: () -> Unit) {
             Text("Muat ulang")
         }
     }
+    }
     if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
     state.failure?.let {
-        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
-            Text(it, Modifier.fillMaxWidth().padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer) {
+            Text(it, Modifier.fillMaxWidth().padding(16.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium)
         }
     }
     if (!state.loading && state.failure == null && (state.data == JsonNull || state.data == JsonArray(emptyList()))) {
-        FormPanel {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Default.Inbox, null, tint = MaterialTheme.colorScheme.primary)
-                Text("Belum ada data.", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
+        InfoPanel(Icons.Default.Inbox, "Belum ada data.", "Catatan yang tersedia akan muncul di sini. Coba sesuaikan filter atau muat ulang.")
     }
 }
 
@@ -415,27 +547,43 @@ private fun FilterFields(keys: List<String>, values: Map<String, String>, option
     if (keys.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
     var draft by remember { mutableStateOf(values) }
+    var filterErrors by remember { mutableStateOf(emptyMap<String, String>()) }
     val active = keys.count { !values[it].isNullOrBlank() }
-    OutlinedButton(onClick = { expanded = !expanded }) {
+    OutlinedButton(onClick = { draft = values; filterErrors = emptyMap(); expanded = true }, modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.small) {
         Icon(Icons.Default.FilterList, null, Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text(if (active == 0) "Filter" else "Filter · $active aktif")
         Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
     }
-    if (expanded) {
-        keys.forEach { key ->
-            val lookupKey = lookupFilters[key]
-            val choices = if (key == "status") JsonObject(mapOf("statuses" to JsonArray(listOf("draft", "pending_approval", "approved", "rejected").map(::JsonPrimitive)))) else options
-            val field = InputField(key, label(key), kind = when {
-                lookupKey != null || key == "status" -> FieldKind.Choice
-                key in listOf("year", "month") -> FieldKind.Integer
-                else -> FieldKind.Text
-            }, lookup = lookupKey ?: if (key == "status") "statuses" else null)
-            FormField(field, draft[key].orEmpty(), null, choices, draft, enabled = true) { draft = draft + (key to it) }
+    if (active > 0) Text(keys.mapNotNull { key ->
+        values[key]?.takeIf(String::isNotBlank)?.let { value ->
+            val option = options.array(lookupFilters[key].orEmpty()).map { it.objectOrEmpty() }.find { it.text("id") == value }
+            "${label(key)} · ${option?.text("name") ?: statuses[value] ?: value}"
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { apply(draft.filterValues(String::isNotBlank)); expanded = false }) { Text("Terapkan") }
-            TextButton(onClick = { draft = emptyMap(); apply(emptyMap()); expanded = false }) { Text("Reset filter") }
+    }.joinToString("   /   "), style = MaterialTheme.typography.labelMedium)
+    if (expanded) ModalBottomSheet(onDismissRequest = { expanded = false }) {
+        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeading("Filter data")
+            keys.forEach { key ->
+                val lookupKey = lookupFilters[key]
+                val choices = if (key == "status") JsonObject(mapOf("statuses" to JsonArray(listOf("draft", "pending_review", "approved", "rejected").map(::JsonPrimitive)))) else options
+                val field = InputField(key, label(key), kind = when {
+                    lookupKey != null || key == "status" -> FieldKind.Choice
+                    key in listOf("year", "month") -> FieldKind.Integer
+                    else -> FieldKind.Text
+                }, lookup = lookupKey ?: if (key == "status") "statuses" else null)
+                FormField(field, draft[key].orEmpty(), filterErrors[key], choices, draft, enabled = true) {
+                    draft = draft + (key to it); filterErrors = filterErrors - key
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    filterErrors = validatePeriodFilters(draft)
+                    if (filterErrors.isEmpty()) { apply(draft.filterValues(String::isNotBlank)); expanded = false }
+                }) { Text("Terapkan") }
+                TextButton(onClick = { draft = emptyMap(); apply(emptyMap()); expanded = false }) { Text("Reset filter") }
+            }
         }
     }
 }
@@ -450,59 +598,104 @@ private fun RecordList(page: Page, module: ModuleSpec, model: WasproViewModel, u
     var filterJson by rememberSaveable { mutableStateOf("{}") }
     val query = wireJson.parseToJsonElement(filterJson).jsonObject.mapValues { it.value.jsonPrimitive.content } +
         if (module == Modules.hauling || path == "faba/movements/pending-approval") mapOf("paginate" to "true") else emptyMap()
+    var visited by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(key) {
-        model.load(key, path, query)
+        if (!visited || state.data == JsonNull) model.load(key, path, query)
+        visited = true
         if (module.filters.any { it in lookupFilters }) model.loadOptions()
     }
-    ScrollContent {
-        if (module.createPermission != null && user.can(module.createPermission) && page.path.isBlank() && module != Modules.hauling) {
-            Button({ model.openEditor(module); open(Page("editor", module.key)) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text("Tambah ${module.title.lowercase()}") }
-        }
-        FilterFields(if (page.path.isBlank()) module.filters else emptyList(), query, options) {
-            filterJson = jsonObject(it).toString()
-            model.load(key, path, it + query.filterKeys { key -> key == "paginate" })
-        }
-        StateHeader(state) { model.load(key, path, query) }
-        val rows = state.data as? JsonArray
-        rows?.forEach { raw ->
-            val item = raw.objectOrEmpty()
-            val targetModule = if (path == "faba/movements/pending-approval") when (item.text("movement_type")) {
-                "utilization_internal", "utilization_external" -> Modules.utilization
-                "adjustment_in", "adjustment_out" -> Modules.adjustments
-                else -> Modules.production
-            } else module
-            val title = listOf("record_number", "hauling_number", "display_number", "period_label", "name").firstNotNullOfOrNull { item.text(it).takeIf(String::isNotBlank) }
+    val listState = rememberLazyListState()
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val gutter = ((maxWidth - 720.dp) / 2).coerceAtLeast(16.dp)
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().imePadding(),
+            contentPadding = PaddingValues(start = gutter, end = gutter, top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item("controls") {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LandscapeHeader(if (page.path.isBlank()) "CATATAN OPERASIONAL" else "ANTREAN PENINJAUAN",
+                        page.title.ifBlank { module.title },
+                        if (page.path.isBlank()) "Pilih catatan untuk melihat rincian dan tindakan yang tersedia." else "Buka pengajuan dan periksa rinciannya sebelum mengambil tindakan.")
+                    if (module.createPermission != null && user.can(module.createPermission) && page.path.isBlank() && module != Modules.hauling) {
+                        Button({ model.openEditor(module); open(Page("editor", module.key)) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.small) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Tambah ${module.title.lowercase()}") }
+                    }
+                    FilterFields(if (page.path.isBlank()) module.filters else emptyList(), query, options) {
+                        filterJson = jsonObject(it).toString()
+                        model.load(key, path, it + query.filterKeys { key -> key == "paginate" })
+                    }
+                    StateHeader(state) { model.load(key, path, query) }
+                }
+            }
+            val rows = state.data as? JsonArray
+            items(rows.orEmpty()) { raw ->
+                val item = raw.objectOrEmpty()
+                val targetModule = if (path == "faba/movements/pending-approval") when (item.text("movement_type")) {
+                    "utilization_internal", "utilization_external" -> Modules.utilization
+                    "adjustment_in", "adjustment_out" -> Modules.adjustments
+                    else -> Modules.production
+                } else module
+                val title = listOf("record_number", "hauling_number", "display_number", "period_label", "name").firstNotNullOfOrNull { item.text(it).takeIf(String::isNotBlank) }
                 ?: statuses[item.text("movement_type")] ?: module.title
-            val movement = if (module in listOf(Modules.production, Modules.utilization, Modules.adjustments)) FabaMovementDto.from(item) else null
-            val quantityText = runCatching {
-                val quantity = if (module == Modules.waste) WasteRecordDto.from(item).quantity else item.text("quantity").toBigDecimal()
-                NumberFormat.getNumberInstance(Locale.forLanguageTag("id-ID")).apply { maximumFractionDigits = 2 }.format(quantity)
-            }.getOrDefault("")
-            val summary = listOf(item.text("date").ifBlank { item.text("transaction_date") },
-                item.obj("waste_type").text("name"), item.text("source"), statuses[movement?.material ?: item.text("material_type")].orEmpty(),
-            ).filter(String::isNotBlank).joinToString(" · ")
-            val statusKey = movement?.approvalStatus.orEmpty().ifBlank { item.text("approval_status").ifBlank { item.text("status") } }
-            val statusText = item.text("status_label").ifBlank { statuses[statusKey] ?: statusKey }
-            val amount = listOf(quantityText, item.text("unit")).filter(String::isNotBlank).joinToString(" ")
-            val domainSummary = if (module == Modules.hauling && page.path.isBlank()) {
-                runCatching { HaulingBacklogDto.from(item) }.getOrNull()?.let {
-                    "$summary · Sisa ${it.remaining.toPlainString()} · Reservasi ${it.reserved.toPlainString()}"
+                val movement = if (module in listOf(Modules.production, Modules.utilization, Modules.adjustments)) FabaMovementDto.from(item) else null
+                val quantityText = runCatching {
+                    val quantity = if (module == Modules.waste) WasteRecordDto.from(item).quantity else item.text("quantity").toBigDecimal()
+                    NumberFormat.getNumberInstance(Locale.forLanguageTag("id-ID")).apply { maximumFractionDigits = 2 }.format(quantity)
+                }.getOrDefault("")
+                val summary = listOf(item.text("date").ifBlank { item.text("transaction_date") },
+                item.text("source"),
+                ).filter(String::isNotBlank).joinToString(" · ")
+                val statusKey = movement?.approvalStatus.orEmpty().ifBlank { item.text("approval_status").ifBlank { item.text("status") } }
+                val statusText = statuses[statusKey] ?: item.text("status_label").ifBlank { statusKey }
+                val amount = listOf(quantityText, item.text("unit")).filter(String::isNotBlank).joinToString(" ")
+                val domainSummary = if (module == Modules.hauling && page.path.isBlank()) {
+                    runCatching { HaulingBacklogDto.from(item) }.getOrNull()?.let {
+                        "$summary · Sisa ${it.remaining.toPlainString()} · Reservasi ${it.reserved.toPlainString()}"
+                    }
+                } else null
+                val materialTitle = item.obj("waste_type").text("name").ifBlank { statuses[item.text("material_type")].orEmpty() }
+                val cardTitle = materialTitle.ifBlank { title }
+                val cardSummary = listOfNotNull(title.takeIf { it != cardTitle }, domainSummary ?: summary).joinToString(" · ")
+                RecordCard(cardTitle, cardSummary.trim(' ', '·'), amount, statusKey, statusText, icon = when (module.key) {
+                    "hauling", "vendors" -> Icons.Default.LocalShipping
+                    "production", "adjustments" -> Icons.Default.Factory
+                    "utilization" -> Icons.Default.Recycling
+                    "users", "profile" -> Icons.Default.Person
+                    "roles" -> Icons.Default.AdminPanelSettings
+                    "categories" -> Icons.Default.Category
+                    "characteristics" -> Icons.Default.HealthAndSafety
+                    "periods" -> Icons.Default.CalendarMonth
+                    else -> Icons.Default.Inventory2
+                }) {
+                    val id = if (module == Modules.periods) "${item.text("year")}/${item.text("month")}" else item.text("id")
+                    val detailPath = when {
+                        module == Modules.hauling && page.path.isBlank() -> "waste-haulings/history/$id"
+                        else -> "${targetModule.path}/$id"
+                    }
+                    open(Page("detail", targetModule.key, id, detailPath, title))
                 }
-            } else null
-            RecordCard(title, (domainSummary ?: summary).trim(' ', '·'), amount, statusKey, statusText) {
-                val id = if (module == Modules.periods) "${item.text("year")}/${item.text("month")}" else item.text("id")
-                val detailPath = when {
-                    module == Modules.hauling && page.path.isBlank() -> "waste-haulings/history/$id"
-                    else -> "${targetModule.path}/$id"
+            }
+            item("footer") {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (rows == null && state.data != JsonNull) FormPanel { JsonDetails(state.data) }
+                    val pagination = state.meta.obj("pagination")
+                    val current = pagination.text("current_page").toIntOrNull() ?: 1
+                    val last = pagination.text("last_page").toIntOrNull() ?: 1
+                    if (last > 1) Text("Halaman $current dari $last", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (current < last) OutlinedButton(onClick = { model.load(key, path, query + ("page" to (current + 1).toString()), append = true) }, enabled = !state.loading) { Text("Muat berikutnya") }
                 }
-                open(Page("detail", targetModule.key, id, detailPath, title))
             }
         }
-        if (rows == null && state.data != JsonNull) FormPanel { JsonDetails(state.data) }
-        val pagination = state.meta.obj("pagination")
-        val current = pagination.text("current_page").toIntOrNull() ?: 1
-        val last = pagination.text("last_page").toIntOrNull() ?: 1
-        if (current < last) OutlinedButton(onClick = { model.load(key, path, query + ("page" to (current + 1).toString()), append = true) }, enabled = !state.loading) { Text("Muat berikutnya") }
+    }
+}
+
+@Composable
+private fun Disclosure(title: String, data: JsonElement) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().animateContentSize(tween(180))) {
+        TextButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { stateDescription = if (expanded) "Terbuka" else "Tertutup" }, onClick = { expanded = !expanded }) {
+            Text(title, Modifier.weight(1f), textAlign = TextAlign.Start)
+            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+        }
+        if (expanded) JsonDetails(data)
     }
 }
 
@@ -523,14 +716,22 @@ private fun RecordDetail(page: Page, module: ModuleSpec, model: WasproViewModel,
             else -> raw
         }
         SectionHeading(if (module == Modules.profile) "Informasi akun" else "Rincian catatan")
-        FormPanel { JsonDetails(raw) }
+        val transaction = module in listOf(Modules.waste, Modules.hauling, Modules.production, Modules.utilization, Modules.adjustments)
+        if (transaction) TransactionSummary(record, module.title) else FormPanel { JsonDetails(raw) }
         if (module == Modules.history) Text("Riwayat aktivitas menampilkan maksimal 100 entri terbaru.")
-        if (state.cachedAt == null) {
+        if (state.cachedAt != null) InfoPanel(Icons.Default.CloudOff, "Mode baca dari perangkat", "Muat ulang saat tersambung untuk mendapatkan status terbaru dan melakukan tindakan.")
+        if (state.cachedAt == null && !state.loading && state.failure == null) {
             val actions = if (module == Modules.profile) setOf("update") else record.actions()
             val available = actions.filter { it !in listOf("view", "review") }
             if (available.isNotEmpty()) SectionHeading("Tindakan tersedia")
             available.forEach { action ->
-                OutlinedButton(onClick = {
+                val fill = when (action) {
+                    "approve", "submit" -> MaterialTheme.colorScheme.primary
+                    "reject", "delete" -> MaterialTheme.colorScheme.errorContainer
+                    else -> MaterialTheme.colorScheme.secondaryContainer
+                }
+                Button(shape = MaterialTheme.shapes.small, colors = ButtonDefaults.buttonColors(containerColor = fill,
+                    contentColor = contentColorFor(fill)), onClick = {
                     when (action) {
                         "update" -> { model.openEditor(module, record); open(Page("editor", module.key, page.id)) }
                         "create_hauling" -> { model.openEditor(Modules.hauling, initial = mapOf("waste_record_id" to record.text("id"))); open(Page("editor", "hauling")) }
@@ -556,6 +757,13 @@ private fun RecordDetail(page: Page, module: ModuleSpec, model: WasproViewModel,
                 }
             }
         }
+        if (transaction) {
+            val grouped = mapOf("hauling_history" to "Riwayat pengangkutan", "history" to "Riwayat transaksi", "attachments" to "Lampiran")
+            grouped.forEach { (key, title) ->
+                raw[key]?.takeIf { it is JsonArray && it.isNotEmpty() }?.let { Disclosure(title, it) }
+            }
+            Disclosure("Informasi tambahan", JsonObject(raw.filterKeys { it !in grouped }))
+        }
         if (module == Modules.utilization && raw.text("attachment_path").isNotBlank()) {
             TextButton(onClick = { model.download("faba/utilization/${page.id}/attachment", emptyMap(), "lampiran-${page.id}.${raw.text("attachment_path").substringAfterLast('.', "pdf")}") { shareFile(context, it) } }) { Text("Buka / bagikan lampiran") }
         }
@@ -565,9 +773,15 @@ private fun RecordDetail(page: Page, module: ModuleSpec, model: WasproViewModel,
         AlertDialog(onDismissRequest = { if (!busy) pending = null },
             title = { Text("${actionLabels[action.action]}?") },
             text = {
-                Column {
-                    Text("Pastikan data sudah ditinjau sebelum melanjutkan.")
-                    if (needsReason || action.action == "approve") OutlinedTextField(reason, { reason = it },
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(when (action.action) {
+                        "delete" -> "Catatan ini akan dihapus dari server. Pastikan catatan yang dipilih sudah benar."
+                        "approve" -> "Persetujuan akan dicatat atas nama akun Anda. Periksa jumlah, dokumen, dan pengaju sebelum melanjutkan."
+                        "reject" -> "Tuliskan alasan yang jelas agar pengaju dapat memperbaiki catatan ini."
+                        "submit" -> "Catatan akan diajukan untuk ditinjau sesuai alur persetujuan organisasi."
+                        else -> "Pastikan data sudah ditinjau sebelum melanjutkan."
+                    })
+                    if (needsReason || action.action == "approve") OutlinedTextField(reason, { reason = it }, Modifier.fillMaxWidth(), enabled = !busy,
                         label = { Text(if (needsReason) "Alasan wajib" else "Catatan (opsional)") })
                 }
             },
@@ -583,7 +797,7 @@ private fun RecordDetail(page: Page, module: ModuleSpec, model: WasproViewModel,
                     pending = null
                     if (action.action == "delete") back() else model.load(page.toString(), path)
                 }
-            }) { Text("Konfirmasi") } },
+            }) { Text(if (busy) "Memproses..." else actionLabels[action.action] ?: "Konfirmasi") } },
             dismissButton = { TextButton(onClick = { pending = null }, enabled = !busy) { Text("Batal") } })
     }
 }
@@ -601,69 +815,127 @@ private fun EditorScreen(model: WasproViewModel, module: ModuleSpec, back: () ->
         if (success) cameraPath?.let { model.attach(FileProvider.getUriForFile(context, context.packageName + ".files", File(it))) }
     }
     val current = state?.takeIf { it.module == module.key }
-    ScrollContent {
-        if (current == null) {
+    if (current == null) {
+        ScrollContent {
             Text("Menyiapkan formulir…")
-            TextButton(onClick = { model.openEditor(module) }) { Text("Coba kembali") }
-            return@ScrollContent
+            TextButton(onClick = model::retryOpenEditor, enabled = !busy) { Text("Coba kembali") }
         }
-        val locked = current.draft?.submittedPayload != null
-        if (locked) Text("Hasil pengiriman belum dipastikan. Coba kirim kembali untuk memeriksa permintaan yang sama.", color = MaterialTheme.colorScheme.error)
-        if (current.saved) Text("Draft tersimpan di perangkat", color = MaterialTheme.colorScheme.primary)
-        conflict?.let { latest ->
-            Text("Data server terbaru", style = MaterialTheme.typography.titleMedium)
-            Text("Bandingkan dengan isian Anda sebelum memakai versi terbaru sebagai acuan.")
-            JsonDetails(latest)
-            if ("update" in latest.actions()) OutlinedButton(onClick = model::acceptLatestVersion, enabled = !busy) { Text("Gunakan versi terbaru sebagai acuan") }
-            else Text("Status atau izin server sudah tidak mengizinkan perubahan.", color = MaterialTheme.colorScheme.error)
-            HorizontalDivider()
+        return
+    }
+    val locked = current.draft?.submittedPayload != null
+    val external = current.values["movement_type"] == "utilization_external"
+    val groups = remember(module, external) {
+        module.fields.filter { field -> field.key != "waste_record_id" && isApplicableField(module, field, current.values) }
+            .map { effectiveField(module, it, current.values) }.groupBy { field ->
+            when (field.key) {
+                "source", "vendor_id", "internal_destination_id", "purpose_id" -> "Asal dan tujuan"
+                "document_number", "document_date" -> "Dokumen"
+                "description", "note", "notes" -> "Keterangan"
+                else -> if (module in listOf(Modules.waste, Modules.hauling, Modules.production,
+                    Modules.utilization, Modules.adjustments)) "Material dan jumlah" else "Informasi utama"
+            }
         }
-        SectionHeading("Isian formulir")
-        FormPanel {
-            Text("Kolom bertanda * wajib diisi.", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(12.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                module.fields.forEach { field ->
-                    val external = current.values["movement_type"] == "utilization_external"
-                    val hidden = module == Modules.utilization && when (field.key) {
-                        "vendor_id", "document_number", "document_date" -> !external
-                        "internal_destination_id" -> external
-                        else -> false
-                    }
-                    if (!hidden && field.key != "waste_record_id") FormField(field, current.values[field.key].orEmpty(), current.errors[field.key], lookup, current.values, enabled = !busy && !locked) {
-                        model.change(field.key, it)
+    }
+    val focus = remember(groups) { groups.values.flatten().associate { it.key to FocusRequester() } }
+    val attachmentFocus = remember { FocusRequester() }
+    var submitted by remember { mutableStateOf(false) }
+    var editorViewportHeight by remember { mutableIntStateOf(0) }
+    val editorScroll = rememberScrollState()
+    val fieldOffsets = remember { mutableMapOf<String, Float>() }
+    var viewportTop by remember { mutableFloatStateOf(0f) }
+    var focusedField by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(focusedField, editorViewportHeight) {
+        focusedField?.let { key ->
+            // Scroll within the actual viewport, including adjustResize on older Android versions.
+            delay(100)
+            fieldOffsets[key]?.let { editorScroll.animateScrollTo(it.toInt().coerceAtLeast(0)) }
+        }
+    }
+    LaunchedEffect(current.errors, submitted) {
+        if (submitted && current.errors.isNotEmpty()) {
+            val first = focus.keys.firstOrNull { it in current.errors }
+            (first?.let { focus[it] } ?: attachmentFocus.takeIf { "attachment" in current.errors })?.requestFocus()
+            submitted = false
+        }
+    }
+    Column(Modifier.fillMaxSize().imePadding()) {
+        Box(Modifier.weight(1f).onSizeChanged { editorViewportHeight = it.height }
+            .onGloballyPositioned { viewportTop = it.positionInRoot().y }) {
+            ScrollContent(keyboardInsets = false, scrollState = editorScroll) {
+                if (locked) InfoPanel(Icons.Default.SyncProblem, "Status pengiriman belum pasti", "Isian dikunci agar tidak terkirim dua kali. Periksa / kirim kembali untuk memeriksa permintaan yang sama.")
+                else if (current.draft != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(if (current.saved) Icons.Default.CheckCircleOutline else Icons.Default.EditNote, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(if (current.saved) "Draft tersimpan di perangkat" else "Perubahan akan disimpan di perangkat", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                conflict?.let { latest ->
+                    Text("Data server terbaru", style = MaterialTheme.typography.titleMedium)
+                    Text("Bandingkan dengan isian Anda sebelum memakai versi terbaru sebagai acuan.")
+                    JsonDetails(latest)
+                    if ("update" in latest.actions()) OutlinedButton(onClick = model::acceptLatestVersion, enabled = !busy) { Text("Gunakan versi terbaru sebagai acuan") }
+                    else Text("Status atau izin server sudah tidak mengizinkan perubahan.", color = MaterialTheme.colorScheme.error)
+                    HorizontalDivider()
+                }
+                Text("Kolom bertanda * wajib diisi.", style = MaterialTheme.typography.bodySmall)
+                if (current.errors.isNotEmpty()) Surface(shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer) {
+                    Text("Periksa ${current.errors.size} isian sebelum menyimpan.", Modifier.fillMaxWidth().padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+                }
+                groups.entries.forEachIndexed { index, (title, fields) ->
+                    FormPanel {
+                        FormSectionTitle(index + 1, title)
+                        fields.forEach { field ->
+                            FormField(field, current.values[field.key].orEmpty(), current.errors[field.key], lookup,
+                                current.values, enabled = !busy && !locked, modifier = Modifier.focusRequester(focus.getValue(field.key))
+                                    .onGloballyPositioned { fieldOffsets[field.key] = it.positionInRoot().y - viewportTop + editorScroll.value }
+                                    .onFocusChanged { if (it.hasFocus) focusedField = field.key else if (focusedField == field.key) focusedField = null }) {
+                                model.change(field.key, it)
+                            }
+                        }
                     }
                 }
+                if (module == Modules.utilization) {
+                    SectionHeading(if (external) "Dokumen pendukung *" else "Dokumen pendukung (opsional)")
+                    Text(current.draft?.attachment?.let { "Lampiran dipilih · ${File(it).name}" }
+                        ?: if (current.existingAttachment) "Lampiran server tersedia" else "Belum ada lampiran")
+                    current.errors["attachment"]?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(modifier = Modifier.focusRequester(attachmentFocus), onClick = { picker.launch(arrayOf("image/jpeg", "image/png", "image/webp", "application/pdf")) }, enabled = !busy && !locked) { Text("Pilih file") }
+                        OutlinedButton(onClick = {
+                            val file = context.cacheDir.resolve("camera").apply { mkdirs() }.resolve("${UUID.randomUUID()}.jpg")
+                            cameraPath = file.path
+                            camera.launch(FileProvider.getUriForFile(context, context.packageName + ".files", file))
+                        }, enabled = !busy && !locked) { Text("Foto") }
+                    }
+                    Text("JPG, PNG, WEBP atau PDF · Maksimal 5 MB", style = MaterialTheme.typography.bodySmall)
+                }
+                if (current.draft != null) TextButton(onClick = { model.leaveEditor(back) }, enabled = !busy) { Text("Lanjutkan nanti") }
             }
         }
-        if (module == Modules.utilization) {
-            SectionHeading("Dokumen pendukung")
-            Text(current.draft?.attachment?.let { "Lampiran dipilih · ${File(it).name}" }
-                ?: if (current.existingAttachment) "Lampiran server tersedia" else "Belum ada lampiran")
-            current.errors["attachment"]?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { picker.launch(arrayOf("image/jpeg", "image/png", "image/webp", "application/pdf")) }, enabled = !busy && !locked) { Text("Pilih file") }
-                OutlinedButton(onClick = {
-                    val file = context.cacheDir.resolve("camera").apply { mkdirs() }.resolve("${UUID.randomUUID()}.jpg")
-                    cameraPath = file.path
-                    camera.launch(FileProvider.getUriForFile(context, context.packageName + ".files", file))
-                }, enabled = !busy && !locked) { Text("Foto") }
+        Surface(shadowElevation = 1.dp, color = MaterialTheme.colorScheme.surface) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Button(onClick = { submitted = true; model.submitEditor { back() } }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    shape = MaterialTheme.shapes.small, enabled = !busy) {
+                    Icon(if (locked) Icons.Default.Sync else Icons.Default.CloudUpload, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (busy) "Menyimpan..." else if (locked) "Periksa / kirim kembali" else "Simpan ke server")
+                }
             }
-            Text("JPG, PNG, WEBP atau PDF · Maksimal 5 MB", style = MaterialTheme.typography.bodySmall)
+            }
         }
-        Button(onClick = { model.submitEditor { back() } }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text(if (locked) "Periksa / kirim kembali" else "Simpan ke server") }
-        if (current.draft != null) OutlinedButton(onClick = back, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Lanjutkan nanti") }
     }
 }
 
 @Composable
-private fun FormField(field: InputField, value: String, error: String?, lookup: JsonObject, values: Map<String, String>, enabled: Boolean, change: (String) -> Unit) {
+private fun FormField(field: InputField, value: String, error: String?, lookup: JsonObject, values: Map<String, String>, enabled: Boolean, modifier: Modifier = Modifier, change: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val fieldModifier = modifier.semantics { if (error != null) error(error) }
     when (field.kind) {
         FieldKind.Date -> {
             var picking by remember { mutableStateOf(false) }
-            OutlinedTextField(value, change, Modifier.fillMaxWidth(), enabled = enabled,
+            OutlinedTextField(value, change, fieldModifier.fillMaxWidth(), enabled = enabled, shape = MaterialTheme.shapes.small,
                 label = { Text(field.label + if (field.required) " *" else "") }, isError = error != null,
                 supportingText = { Text("YYYY-MM-DD") }, singleLine = true,
                 trailingIcon = { IconButton(onClick = { picking = true }, enabled = enabled) { Icon(Icons.Default.CalendarMonth, "Pilih tanggal") } })
@@ -680,9 +952,11 @@ private fun FormField(field: InputField, value: String, error: String?, lookup: 
                 }
             }
         }
-        FieldKind.Boolean -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = value == "true", onCheckedChange = { change(it.toString()) }, enabled = enabled)
-            Text(field.label, Modifier.padding(start = 12.dp))
+        FieldKind.Boolean -> Row(fieldModifier.fillMaxWidth().heightIn(min = 56.dp)
+            .toggleable(value = value == "true", enabled = enabled, role = Role.Switch, onValueChange = { change(it.toString()) }),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(field.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Switch(checked = value == "true", onCheckedChange = null, enabled = enabled)
         }
         FieldKind.Choice -> {
             val options = lookup.array(field.lookup.orEmpty()).map { option ->
@@ -692,27 +966,31 @@ private fun FormField(field: InputField, value: String, error: String?, lookup: 
             ExposedDropdownMenuBox(expanded && enabled, { if (enabled) expanded = !expanded }) {
                 OutlinedTextField(options.firstOrNull { it.first == value }?.second ?: value, {}, readOnly = true,
                     label = { Text(field.label + if (field.required) " *" else "") }, isError = error != null,
-                    enabled = enabled, modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled),
+                    enabled = enabled, shape = MaterialTheme.shapes.small, modifier = fieldModifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled),
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) })
                 ExposedDropdownMenu(expanded && enabled, { expanded = false }) {
                     if (!field.required) DropdownMenuItem(text = { Text("Tidak dipilih") }, onClick = { change(""); expanded = false })
+                    if (options.isEmpty()) DropdownMenuItem(text = { Text("Belum ada pilihan tersedia") }, onClick = {}, enabled = false)
                     options.forEach { (id, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { change(id); expanded = false }) }
                 }
             }
         }
-        else -> OutlinedTextField(value, change, Modifier.fillMaxWidth(), enabled = enabled,
+        else -> OutlinedTextField(value, change, fieldModifier.fillMaxWidth(), enabled = enabled, shape = MaterialTheme.shapes.small,
             label = { Text(field.label + if (field.required) " *" else "") }, isError = error != null,
             supportingText = if (field.kind == FieldKind.Date) ({ Text("YYYY-MM-DD") }) else null,
             keyboardOptions = KeyboardOptions(keyboardType = when (field.kind) {
                 FieldKind.Decimal -> KeyboardType.Decimal
                 FieldKind.Integer -> KeyboardType.Number
                 FieldKind.Password -> KeyboardType.Password
-                else -> KeyboardType.Text
+                else -> when (field.key) { "email" -> KeyboardType.Email; "phone" -> KeyboardType.Phone; else -> KeyboardType.Text }
             }),
-            visualTransformation = if (field.kind == FieldKind.Password) PasswordVisualTransformation() else VisualTransformation.None,
+            trailingIcon = if (field.kind == FieldKind.Password) ({ IconButton(onClick = { passwordVisible = !passwordVisible }, enabled = enabled) {
+                Icon(if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (passwordVisible) "Sembunyikan password" else "Tampilkan password")
+            } }) else null,
+            visualTransformation = if (field.kind == FieldKind.Password && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
             singleLine = field.key !in listOf("note", "notes", "description", "address"))
     }
-    error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    error?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 }
 
 @Composable
@@ -725,21 +1003,65 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
     val options by model.lookups.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { model.loadOptions() }
     val busy by model.busy.collectAsStateWithLifecycle()
+    val reports = listOf(
+            "monthly" to "Bulanan", "yearly" to "Tahunan", "vendors" to "Vendor", "internal-destinations" to "Tujuan internal",
+            "purposes" to "Tujuan penggunaan", "stock-card" to "Kartu stok", "anomalies" to "Anomali", "analysis-matrix" to "Matriks analisis",
+        )
+    var selected by rememberSaveable { mutableStateOf(reports.first().first) }
+    var format by rememberSaveable { mutableStateOf("pdf") }
+    val chosen = selected.takeIf { user.can("faba_reports.export") }
+    val extras = wireJson.parseToJsonElement(extraFilters).jsonObject.mapValues { it.value.jsonPrimitive.content }
+    val filters = (extras + mapOf("year" to year, "month" to month, "material_type" to material)).filterValues(String::isNotBlank)
+    val validPeriod = year.toIntOrNull() in 2000..2100 && month.toIntOrNull() in 1..12
+    var showFilters by rememberSaveable { mutableStateOf(false) }
     ScrollContent {
-        SectionHeading("Periode laporan")
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(year, { year = it }, Modifier.weight(1f), singleLine = true, label = { Text("Tahun") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            OutlinedTextField(month, { month = it }, Modifier.weight(1f), singleLine = true, label = { Text("Bulan") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        }
-        SectionHeading("Material")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("" to "Semua", "fly_ash" to "Fly Ash", "bottom_ash" to "Bottom Ash").forEach { (key, title) ->
-                FilterChip(selected = material == key, onClick = { material = key }, label = { Text(title) })
+        LandscapeHeader("PUSAT LAPORAN", "Data untuk keputusan Anda", "Pilih periode dan material, lalu unduh laporan sesuai hak akses akun.")
+        if (chosen == null && listOf(Modules.waste, Modules.production, Modules.utilization).none { Modules.visible(it, user) })
+            InfoPanel(Icons.Default.Lock, "Akses unduhan belum tersedia", "Hubungi administrator untuk memeriksa hak akses laporan dan ekspor akun Anda.")
+        if (chosen != null) {
+            FormPanel {
+            FormSectionTitle(1, "Jenis laporan")
+            var expanded by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    shape = MaterialTheme.shapes.small) {
+                    Icon(Icons.Default.Assessment, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(reports.first { it.first == selected }.second, Modifier.weight(1f), textAlign = TextAlign.Start)
+                    Icon(Icons.Default.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded, { expanded = false }) {
+                    reports.forEach { (key, title) -> DropdownMenuItem(text = { Text(title) },
+                        onClick = { selected = key; expanded = false }) }
+                }
             }
         }
-        val extras = wireJson.parseToJsonElement(extraFilters).jsonObject.mapValues { it.value.jsonPrimitive.content }
-        var showFilters by rememberSaveable { mutableStateOf(false) }
-        OutlinedButton(onClick = { showFilters = !showFilters }) {
+        }
+        FormPanel {
+        FormSectionTitle(if (chosen == null) 1 else 2, "Periode laporan")
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth < 280.dp || LocalDensity.current.fontScale > 1.3f) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(year, { year = it }, Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small, singleLine = true, label = { Text("Tahun") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    OutlinedTextField(month, { month = it }, Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small, singleLine = true, label = { Text("Bulan") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                }
+            } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(year, { year = it }, Modifier.weight(1f), shape = MaterialTheme.shapes.small, singleLine = true, label = { Text("Tahun") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(month, { month = it }, Modifier.weight(1f), shape = MaterialTheme.shapes.small, singleLine = true, label = { Text("Bulan") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("Material", style = MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("" to "Semua", "fly_ash" to "Fly Ash", "bottom_ash" to "Bottom Ash").forEach { (key, title) ->
+                FilterChip(selected = material == key, onClick = { material = key }, label = { Text(title) },
+                    leadingIcon = if (material == key) ({ Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }) else null)
+            }
+        }
+        TextButton(onClick = { showFilters = !showFilters }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .semantics { stateDescription = if (showFilters) "Terbuka" else "Tertutup" }) {
+            Icon(Icons.Default.Tune, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
             Text("Filter tambahan" + if (extras.values.any(String::isNotBlank)) " · aktif" else "")
         }
         if (showFilters) listOf("vendor_id", "internal_destination_id", "purpose_id", "movement_type").forEach { key ->
@@ -748,27 +1070,45 @@ private fun ReportsScreen(model: WasproViewModel, user: UserContext) {
                 extraFilters = jsonObject(extras + (key to it)).toString()
             }
         }
-        val filters = (extras + mapOf("year" to year, "month" to month, "material_type" to material)).filterValues(String::isNotBlank)
-        val validPeriod = year.toIntOrNull() in 2000..2100 && month.toIntOrNull() in 1..12
         if (!validPeriod) Text("Isi tahun 2000–2100 dan bulan 1–12 untuk mengunduh laporan.", color = MaterialTheme.colorScheme.error)
-        if (user.can("faba_reports.export")) SectionHeading("Unduh laporan FABA")
-        if (user.can("faba_reports.export")) listOf(
-            "monthly" to "Bulanan", "yearly" to "Tahunan", "vendors" to "Vendor", "internal-destinations" to "Tujuan internal",
-            "purposes" to "Tujuan penggunaan", "stock-card" to "Kartu stok", "anomalies" to "Anomali", "analysis-matrix" to "Matriks analisis",
-        ).forEach { (report, title) ->
+        }
+        if (chosen != null) {
             FormPanel {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("pdf", "xlsx").forEach { format ->
-                        TextButton(onClick = { model.download("faba/reports/$report.$format", filters, "waspro-$report-$year-$month.$format") { shareFile(context, it) } }, enabled = !busy && validPeriod) { Text(format.uppercase()) }
-                    }
-                }
+            FormSectionTitle(3, "Format unduhan")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("pdf","xlsx").forEach { ext -> FilterChip(selected = format == ext,
+                    onClick = { format = ext }, label = { Text(ext.uppercase()) },
+                    leadingIcon = { Icon(if (ext == "pdf") Icons.Default.PictureAsPdf else Icons.Default.TableChart, null, Modifier.size(18.dp)) }) }
             }
+            Button(onClick = { model.download("faba/reports/$chosen.$format", filters,
+                "waspro-$chosen-$year-$month.$format") { shareFile(context, it) } }, enabled = !busy && validPeriod,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.small) {
+                Icon(Icons.Default.Download, null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Unduh ${reports.first { it.first == chosen }.second}")
+            }
+        }
         }
         val exports = listOf(Modules.waste, Modules.production, Modules.utilization).filter { Modules.visible(it, user) }
         if (exports.isNotEmpty()) SectionHeading("Ekspor data CSV")
         exports.forEach { module ->
-            OutlinedButton(onClick = { model.download("${module.path}/export/csv", filters, "waspro-${module.key}.csv") { shareFile(context, it) } }, enabled = !busy && validPeriod) { Text("CSV ${module.title}") }
+            FormPanel {
+                Text(module.title, style = MaterialTheme.typography.titleMedium)
+                val supported = when (module) {
+                    Modules.waste -> emptySet()
+                    Modules.production -> setOf("year", "month", "material_type", "movement_type")
+                    else -> setOf("year", "month", "material_type", "movement_type", "vendor_id")
+                }
+                val exportFilters = filters.filterKeys { it in supported }
+                Text(when (module) {
+                    Modules.waste -> "Semua catatan sesuai hak akses. Filter periode dan material di atas tidak berlaku untuk CSV limbah."
+                    Modules.production -> "Mengikuti periode, material, dan tipe transaksi."
+                    else -> "Mengikuti periode, material, tipe transaksi, dan vendor."
+                }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onClick = { model.download("${module.path}/export/csv", exportFilters,
+                    "waspro-${module.key}.csv") { shareFile(context, it) } }, enabled = !busy && (module == Modules.waste || validPeriod),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.small) { Icon(Icons.Default.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("CSV ${module.title}") }
+            }
         }
     }
 }
@@ -786,9 +1126,16 @@ internal fun JsonDetails(element: JsonElement, depth: Int = 0) {
             element.filterKeys { it !in ignored && !it.endsWith("_id") && it + "_label" !in element && it != "slug" }.forEach { (key, value) ->
                 if (value != JsonNull && value.toString() !in listOf("[]", "{}", "\"\"")) {
                     if (value is JsonPrimitive) {
-                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(label(key), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                            Text(displayValue(key, value), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                            if (maxWidth < 360.dp || LocalDensity.current.fontScale >= 1.3f) {
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(label(key), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                                    Text(displayValue(key, value), style = MaterialTheme.typography.bodyLarge)
+                                }
+                            } else Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Text(label(key), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                                Text(displayValue(key, value), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     } else {
                         Text(label(key), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
@@ -811,6 +1158,10 @@ internal fun JsonDetails(element: JsonElement, depth: Int = 0) {
 internal fun displayValue(key: String, value: JsonPrimitive): String {
     val text = value.content
     statuses[text]?.let { return it }
+    if (key in setOf("year", "month", "period_year", "period_month")) return text
+    if (key == "date" || key.endsWith("_date")) {
+        return runCatching { LocalDate.parse(text).format(DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.forLanguageTag("id-ID"))) }.getOrDefault(text)
+    }
     if (key.endsWith("_at")) {
         return runCatching { OffsetDateTime.parse(text).atZoneSameInstant(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.forLanguageTag("id-ID"))) }.getOrDefault(text)
     }
